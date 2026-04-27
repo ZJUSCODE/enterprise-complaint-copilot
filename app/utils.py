@@ -41,6 +41,11 @@ def safe_json_loads(raw_text: str) -> dict[str, Any]:
     return loaded
 
 
+def summarize_text(text: str, limit: int = 110) -> str:
+    clean = re.sub(r"\s+", " ", (text or "").strip())
+    return clean[:limit] + ("..." if len(clean) > limit else "")
+
+
 def _strip_sql_literals_and_comments(sql: str) -> str:
     sanitized: list[str] = []
     i = 0
