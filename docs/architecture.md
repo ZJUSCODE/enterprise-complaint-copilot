@@ -23,6 +23,8 @@ The backend is intentionally split by responsibility:
 | Module | Responsibility |
 | --- | --- |
 | `app/runtime.py` | FastAPI app wiring, runtime initialization, HTTP routes |
+| `app/runtime_state.py` | Runtime dependency assembly and singleton application state |
+| `app/http_auth.py` | Bearer token parsing, optional/required current-user dependencies, role resolution |
 | `app/orchestrator.py` | Request-level orchestration, audit, review queue, token/cost metadata |
 | `app/function_agent.py` | Function calling loop, deterministic fallback, tool argument validation |
 | `app/tool_registry.py` | Tool catalog, RBAC checks, MCP-compatible list/call surface |
