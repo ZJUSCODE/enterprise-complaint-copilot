@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>审批中心模拟页</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/review.js" defer></script>
+</head>
+<body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <div class="shell review-shell">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">Human Review</p>
+                <h1>审批中心模拟页</h1>
+            </div>
+            <div class="topbar-meta" aria-label="页面导航">
+                <a href="/">返回工作台</a>
+                <span>Guardrail</span>
+                <span>Supervisor</span>
+                <span>状态流转</span>
+            </div>
+        </header>
+
+        <main class="surface review-center">
+            <section class="review-center-head">
+                <div>
+                    <p class="eyebrow">Review Queue</p>
+                    <h2>人工复核队列</h2>
+                    <p>这里只模拟高危请求的人工兜底，不执行真实退款、改单或审批动作。</p>
+                </div>
+                <button id="seedReviewCase" type="button" class="ghost-action">生成演示复核单</button>
+            </section>
+
+            <div class="review-tabs" role="tablist" aria-label="复核状态">
+                <button type="button" class="review-tab active" data-status="pending">待复核</button>
+                <button type="button" class="review-tab" data-status="resolved">已通过</button>
+                <button type="button" class="review-tab" data-status="rejected">已驳回</button>
+            </div>
+
+            <div id="reviewQueueStatus" class="review-status">加载中</div>
+            <div id="reviewQueueList" class="review-list"></div>
+        </main>
+    </div>
+</body>
+</html>

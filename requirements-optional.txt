@@ -1,0 +1,9 @@
+# Optional scripts for MySQL import, model training, and legacy local vector store.
+imbalanced-learn>=0.12
+joblib>=1.4
+langchain-community>=0.3
+langchain-huggingface>=0.1
+pymysql>=1.1
+scikit-learn>=1.4
+sqlalchemy>=2.0
+xgboost>=2.0

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "complaint-copilot": {
+      "command": "python",
+      "args": ["scripts/mcp_stdio_server.py", "--role", "analyst"],
+      "env": {
+        "AUTH_ENFORCED": "false",
+        "REDIS_ENABLED": "false",
+        "DATA_QUERY_BACKEND": "sqlite",
+        "USE_LANGCHAIN_RAG": "false"
+      }
+    }
+  }
+}

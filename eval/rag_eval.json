@@ -1,0 +1,114 @@
+[
+  {
+    "question": "普通退货还在 7 天无理由范围内，应该先查什么？",
+    "expected_doc_id": "POL-001",
+    "expected_topic": "通用退换货处理基线",
+    "tag": "baseline"
+  },
+  {
+    "question": "用户签收 3 天内想退货，没有质量问题，客服应该按什么基线处理？",
+    "expected_doc_id": "POL-001",
+    "expected_topic": "通用退换货处理基线",
+    "tag": "baseline"
+  },
+  {
+    "question": "一线客服能不能对高风险用户口头承诺超额赔付？需要保留什么依据？",
+    "expected_doc_id": "POL-005",
+    "acceptable_doc_ids": ["POL-001", "POL-005"],
+    "expected_topic": "高风险扩赔与通用输出边界",
+    "tag": "similar_sop"
+  },
+  {
+    "question": "物流延误超过 7 天并且包装破损，客服应该怎么安抚？",
+    "expected_doc_id": "POL-002",
+    "expected_topic": "物流延误与破损安抚策略",
+    "tag": "logistics"
+  },
+  {
+    "question": "包裹晚到且外包装损坏，应该先补发还是先取证？",
+    "expected_doc_id": "POL-002",
+    "expected_topic": "物流延误与破损安抚策略",
+    "tag": "logistics"
+  },
+  {
+    "question": "高价值商品物流延误，客服能不能扩大赔付金额？",
+    "expected_doc_id": "POL-002",
+    "acceptable_doc_ids": ["POL-002", "POL-005"],
+    "expected_topic": "物流延误与高风险扩赔边界",
+    "tag": "similar_sop"
+  },
+  {
+    "question": "3C 数码拆封后出现质量问题，应该怎么处理？",
+    "expected_doc_id": "POL-003",
+    "expected_topic": "3C 数码类质量争议",
+    "tag": "3c"
+  },
+  {
+    "question": "手机已拆封，用户说功能异常，客服应该收集哪些证据？",
+    "expected_doc_id": "POL-003",
+    "expected_topic": "3C 数码类质量争议",
+    "tag": "3c"
+  },
+  {
+    "question": "耳机拆封后用户主观不满意，能不能直接套用无理由退货？",
+    "expected_doc_id": "POL-003",
+    "acceptable_doc_ids": ["POL-003", "POL-001"],
+    "expected_topic": "3C 拆封与通用退货混淆",
+    "tag": "similar_sop"
+  },
+  {
+    "question": "生鲜坏了并且冷链超时，运费和货款怎么赔？",
+    "expected_doc_id": "POL-004",
+    "expected_topic": "生鲜坏损与时效异常",
+    "tag": "fresh"
+  },
+  {
+    "question": "水果签收后发现腐烂，用户提供照片时应该走补发还是退款？",
+    "expected_doc_id": "POL-004",
+    "expected_topic": "生鲜坏损与时效异常",
+    "tag": "fresh"
+  },
+  {
+    "question": "生鲜重复索赔账户又说冷链超时，应该直接赔付吗？",
+    "expected_doc_id": "POL-004",
+    "acceptable_doc_ids": ["POL-004", "POL-005"],
+    "expected_topic": "生鲜坏损与高风险复核",
+    "tag": "similar_sop"
+  },
+  {
+    "question": "高风险用户要求超额赔付，客服能不能直接承诺？",
+    "expected_doc_id": "POL-005",
+    "expected_topic": "高风险用户升级处理",
+    "tag": "risk"
+  },
+  {
+    "question": "风险分很高的账户多次重复索赔，应该保留什么记录并走谁复核？",
+    "expected_doc_id": "POL-005",
+    "expected_topic": "高风险用户升级处理",
+    "tag": "risk"
+  },
+  {
+    "question": "主管复核前，客服可以先给高风险账户全额赔付承诺吗？",
+    "expected_doc_id": "POL-005",
+    "expected_topic": "高风险用户升级处理",
+    "tag": "risk"
+  },
+  {
+    "question": "公司年会报销流程怎么走？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "仓库员工排班系统如何修改班次？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "办公室 WiFi 密码忘记了怎么重置？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  }
+]

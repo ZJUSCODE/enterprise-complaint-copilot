@@ -1,0 +1,39 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python cache and test cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime logs
+*.log
+
+# Local databases, vector stores, and model artifacts
+*.sqlite3
+chroma_db/
+chroma_openai/
+*.pkl
+
+# Browser/IDE generated files
+.playwright-mcp/
+.idea/
+roots.sst
+
+# Generated screenshots and interview export artifacts
+*.png
+*.docx
+output/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node/Playwright local dependencies and reports
+node_modules/
+test-results/
+playwright-report/
+frontend/dist/

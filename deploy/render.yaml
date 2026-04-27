@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: complaint-copilot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: AUTH_ENFORCED
+        value: "true"
+      - key: REDIS_ENABLED
+        value: "false"
+      - key: DATA_QUERY_BACKEND
+        value: sqlite
+      - key: USE_LANGCHAIN_RAG
+        value: "false"
+      - key: JWT_SECRET
+        generateValue: true
