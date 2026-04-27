@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -26,6 +26,7 @@ from app.config import (
 )
 from app.domain import COMPLAINT_PATTERNS, POLICY_PATTERNS, contains_any
 from app.permissions import PermissionPolicy
+from app.http_auth import _bearer_token, optional_current_user, require_current_user, resolve_role
 from app.security import jwt_decode, jwt_encode, utc_now
 from app.schemas import (
     AuthUser,
@@ -72,42 +73,6 @@ app = FastAPI(title=APP_TITLE, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if FRONTEND_ASSETS_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="frontend-assets")
-
-
-def _bearer_token(authorization: str | None) -> str | None:
-    if not authorization:
-        return None
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        return None
-    return token.strip()
-
-
-def optional_current_user(authorization: str | None = Header(default=None)) -> dict[str, Any] | None:
-    runtime = get_runtime()
-    token = _bearer_token(authorization)
-    if not token:
-        if runtime.settings.auth_enforced:
-            raise HTTPException(status_code=401, detail={"code": "missing_token", "message": "Bearer token required"})
-        return None
-    try:
-        payload = jwt_decode(token, runtime.settings.jwt_secret)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail={"code": str(exc), "message": "Invalid or expired token"}) from exc
-    user = runtime.user_store.get_by_id(str(payload.get("sub", "")))
-    if not user or not user.get("is_active"):
-        raise HTTPException(status_code=401, detail={"code": "user_inactive", "message": "User is inactive or missing"})
-    return user
-
-
-def require_current_user(current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
-    if current_user:
-        return current_user
-    raise HTTPException(status_code=401, detail={"code": "missing_token", "message": "Bearer token required"})
-
-
-def resolve_role(requested_role: str | None, current_user: dict[str, Any] | None) -> str:
-    return current_user["role"] if current_user else (requested_role or "analyst")
 
 
 def cached_response(key: str, ttl_seconds: int, builder):
