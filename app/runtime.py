@@ -1,14 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import hmac
 import json
-import logging
 import os
 import re
-import secrets
 import sqlite3
 import time
 import uuid
@@ -27,6 +22,40 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
+from app.config import (
+    APP_TITLE,
+    AUDIT_DB_PATH,
+    AUTH_DB_PATH,
+    BASE_DIR,
+    DATA_DIR,
+    FRONTEND_ASSETS_DIR,
+    FRONTEND_DIST_DIR,
+    KB_DIR,
+    SQLITE_DB_PATH,
+    STATIC_DIR,
+    TEMPLATE_DIR,
+    VECTOR_DIR,
+    Settings,
+    load_dotenv_file,
+    logger,
+)
+from app.permissions import PermissionPolicy
+from app.security import hash_password, jwt_decode, jwt_encode, utc_now, verify_password
+from app.utils import (
+    SQL_FORBIDDEN_KEYWORDS,
+    add_token_usage,
+    clamp,
+    estimate_cost,
+    estimate_cost_breakdown,
+    estimate_text_tokens,
+    extract_langchain_usage,
+    extract_usage,
+    lexical_overlap_score,
+    safe_json_loads,
+    timed_call,
+    validate_readonly_sql,
+)
+
 try:
     import redis
 except ImportError:  # pragma: no cover - optional production dependency
@@ -39,22 +68,6 @@ except ImportError:  # pragma: no cover - optional dependency fallback
     START = "__start__"
     StateGraph = None
 
-
-BASE_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = BASE_DIR / "Olist"
-STATIC_DIR = BASE_DIR / "static"
-TEMPLATE_DIR = BASE_DIR / "templates"
-FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
-FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
-KB_DIR = BASE_DIR / "knowledge_base"
-VECTOR_DIR = BASE_DIR / "chroma_openai"
-SQLITE_DB_PATH = BASE_DIR / "complaint_copilot.sqlite3"
-AUDIT_DB_PATH = BASE_DIR / "audit_log.sqlite3"
-AUTH_DB_PATH = BASE_DIR / "copilot_auth.sqlite3"
-
-APP_TITLE = "Enterprise Complaint Copilot"
-logger = logging.getLogger("complaint_copilot")
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(message)s")
 
 PRODUCT_CATEGORY_RULES = {
     "3C数码": ["audio", "cine", "computer", "consoles", "electronics", "pcs", "tablets", "telefonia", "games", "office", "cool_stuff"],
@@ -114,22 +127,6 @@ DATA_EXFILTRATION_PATTERNS = [
 QUERY_PATTERNS = ["查询", "查一下", "明细", "退款", "赔付", "订单", "统计", "分析", "风险", "用户"]
 POLICY_PATTERNS = ["政策", "规则", "SOP", "怎么赔", "能不能退", "如何处理", "依据", "条款", "规范", "怎么处理", "应该怎么", "how to", "should we", "policy"]
 
-SQL_FORBIDDEN_KEYWORDS = {
-    "ALTER",
-    "ATTACH",
-    "CREATE",
-    "DELETE",
-    "DETACH",
-    "DROP",
-    "INSERT",
-    "PRAGMA",
-    "REINDEX",
-    "REPLACE",
-    "TRUNCATE",
-    "UPDATE",
-    "VACUUM",
-}
-
 TICKETS_SCHEMA = {
     "table": "tickets",
     "description": "售后客诉与退款分析宽表，只面向只读查询和聚合分析。",
@@ -157,24 +154,6 @@ TICKETS_SCHEMA = {
 
 def load_template(name: str) -> str:
     return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
-
-
-def load_dotenv_file(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-def clamp(value: float, minimum: float, maximum: float) -> float:
-    return max(minimum, min(maximum, value))
 
 
 def classify_category(raw_value: str) -> str:
@@ -224,301 +203,12 @@ def contains_any(message: str, patterns: list[str]) -> bool:
     return any(pattern.lower() in lowered for pattern in patterns)
 
 
-def safe_json_loads(raw_text: str) -> dict[str, Any]:
-    payload = (raw_text or "").strip()
-    if not payload:
-        return {}
-    try:
-        loaded = json.loads(payload)
-    except json.JSONDecodeError:
-        fenced = re.sub(r"^```(?:json)?|```$", "", payload, flags=re.MULTILINE).strip()
-        loaded = json.loads(fenced)
-    if not isinstance(loaded, dict):
-        raise ValueError("tool arguments must be a JSON object")
-    return loaded
-
-
-def _strip_sql_literals_and_comments(sql: str) -> str:
-    sanitized: list[str] = []
-    i = 0
-    in_single_quote = False
-    in_double_quote = False
-    length = len(sql)
-    while i < length:
-        char = sql[i]
-        next_char = sql[i + 1] if i + 1 < length else ""
-
-        if in_single_quote:
-            sanitized.append(" ")
-            if char == "'" and next_char == "'":
-                sanitized.append(" ")
-                i += 2
-                continue
-            if char == "'":
-                in_single_quote = False
-            i += 1
-            continue
-
-        if in_double_quote:
-            sanitized.append(" ")
-            if char == '"' and next_char == '"':
-                sanitized.append(" ")
-                i += 2
-                continue
-            if char == '"':
-                in_double_quote = False
-            i += 1
-            continue
-
-        if char == "-" and next_char == "-":
-            sanitized.append(" ")
-            i += 2
-            while i < length and sql[i] not in "\r\n":
-                i += 1
-            continue
-
-        if char == "/" and next_char == "*":
-            sanitized.append(" ")
-            i += 2
-            while i + 1 < length and not (sql[i] == "*" and sql[i + 1] == "/"):
-                i += 1
-            i += 2
-            continue
-
-        if char == "'":
-            in_single_quote = True
-            sanitized.append(" ")
-            i += 1
-            continue
-
-        if char == '"':
-            in_double_quote = True
-            sanitized.append(" ")
-            i += 1
-            continue
-
-        sanitized.append(char)
-        i += 1
-
-    if in_single_quote or in_double_quote:
-        raise ValueError("SQL 字符串字面量未闭合。")
-    return "".join(sanitized)
-
-
-def validate_readonly_sql(sql: str) -> str:
-    if not isinstance(sql, str) or not sql.strip():
-        raise ValueError("SQL 不能为空。")
-
-    sanitized = _strip_sql_literals_and_comments(sql)
-    statements = [statement.strip() for statement in sanitized.split(";") if statement.strip()]
-    if len(statements) != 1:
-        raise ValueError("只允许执行单条只读 SQL。")
-
-    statement = re.sub(r"\s+", " ", statements[0]).strip()
-    upper_statement = statement.upper()
-    if not upper_statement.startswith(("SELECT ", "WITH ")):
-        raise ValueError("只允许 SELECT/WITH 只读查询。")
-
-    tokens = set(re.findall(r"\b[A-Z_]+\b", upper_statement))
-    forbidden = sorted(tokens & SQL_FORBIDDEN_KEYWORDS)
-    if forbidden:
-        raise ValueError(f"只读 SQL 禁止包含写操作关键字：{', '.join(forbidden)}。")
-    if re.search(r"\bSELECT\b.+\bINTO\b", upper_statement):
-        raise ValueError("只读 SQL 禁止 SELECT INTO。")
-    return sql
-
-
-def lexical_overlap_score(query: str, text: str) -> float:
-    query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]{2,}", query.lower()))
-    text_tokens = set(re.findall(r"[\w\u4e00-\u9fff]{2,}", text.lower()))
-    if not query_tokens or not text_tokens:
-        return 0.0
-    return len(query_tokens & text_tokens) / max(len(query_tokens), 1)
-
-
 def normalize_category(category: str | None) -> str | None:
     if not category:
         return None
     if category in PRODUCT_CATEGORY_RULES:
         return category
     return CATEGORY_QUERY_MAP.get(category)
-
-
-@dataclass
-class Settings:
-    llm_api_key: str = ""
-    llm_base_url: str | None = None
-    llm_model: str = "gpt-4o-mini"
-    embedding_api_key: str = ""
-    embedding_base_url: str | None = None
-    embedding_model: str = "text-embedding-3-small"
-    use_langchain_rag: bool = True
-    auto_build_vector_store: bool = False
-    data_query_backend: Literal["sqlite", "mysql"] = "sqlite"
-    jwt_secret: str = "change-me"
-    jwt_access_token_minutes: int = 120
-    auth_enforced: bool = False
-    redis_url: str = "redis://localhost:6379/0"
-    redis_enabled: bool = True
-    rate_limit_per_minute: int = 120
-    session_ttl_seconds: int = 86400
-    cache_ttl_seconds: int = 60
-    llm_max_retries: int = 1
-    llm_prompt_cost_per_1k: float = 0.0
-    llm_completion_cost_per_1k: float = 0.0
-    embedding_cost_per_1k: float = 0.0
-
-    def __post_init__(self) -> None:
-        self.llm_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-        self.llm_base_url = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        self.llm_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
-        self.embedding_api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-        self.embedding_base_url = os.getenv("EMBEDDING_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-        self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-        self.use_langchain_rag = os.getenv("USE_LANGCHAIN_RAG", "true").lower() == "true"
-        self.auto_build_vector_store = os.getenv("AUTO_BUILD_VECTOR_STORE", "false").lower() == "true"
-        backend = os.getenv("DATA_QUERY_BACKEND", "sqlite").strip().lower()
-        self.data_query_backend = "mysql" if backend == "mysql" else "sqlite"
-        self.jwt_secret = os.getenv("JWT_SECRET", "dev-change-me")
-        self.jwt_access_token_minutes = int(os.getenv("JWT_ACCESS_TOKEN_MINUTES", "120"))
-        self.auth_enforced = os.getenv("AUTH_ENFORCED", "false").lower() == "true"
-        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        self.redis_enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
-        self.rate_limit_per_minute = int(os.getenv("RATE_LIMIT_PER_MINUTE", "120"))
-        self.session_ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
-        self.cache_ttl_seconds = int(os.getenv("CACHE_TTL_SECONDS", "60"))
-        self.llm_max_retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
-        self.llm_prompt_cost_per_1k = float(os.getenv("LLM_PROMPT_COST_PER_1K", "0"))
-        self.llm_completion_cost_per_1k = float(os.getenv("LLM_COMPLETION_COST_PER_1K", "0"))
-        self.embedding_cost_per_1k = float(os.getenv("EMBEDDING_COST_PER_1K", "0"))
-
-
-def _b64url_encode(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
-def _b64url_decode(raw: str) -> bytes:
-    padding = "=" * (-len(raw) % 4)
-    return base64.urlsafe_b64decode((raw + padding).encode("ascii"))
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def hash_password(password: str, salt: str | None = None, iterations: int = 210_000) -> str:
-    salt_bytes = _b64url_decode(salt) if salt else secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, iterations)
-    return f"pbkdf2_sha256${iterations}${_b64url_encode(salt_bytes)}${_b64url_encode(digest)}"
-
-
-def verify_password(password: str, stored_hash: str) -> bool:
-    try:
-        algorithm, iterations, salt, digest = stored_hash.split("$", 3)
-        if algorithm != "pbkdf2_sha256":
-            return False
-        candidate = hash_password(password, salt=salt, iterations=int(iterations)).split("$", 3)[3]
-        return hmac.compare_digest(candidate, digest)
-    except Exception:
-        return False
-
-
-def jwt_encode(payload: dict[str, Any], secret: str) -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    header_part = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-    payload_part = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{header_part}.{payload_part}".encode("ascii")
-    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    return f"{header_part}.{payload_part}.{_b64url_encode(signature)}"
-
-
-def jwt_decode(token: str, secret: str) -> dict[str, Any]:
-    try:
-        header_part, payload_part, signature_part = token.split(".", 2)
-    except ValueError as exc:
-        raise ValueError("invalid_token_format") from exc
-    signing_input = f"{header_part}.{payload_part}".encode("ascii")
-    expected = _b64url_encode(hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest())
-    if not hmac.compare_digest(expected, signature_part):
-        raise ValueError("invalid_token_signature")
-    payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
-    if int(payload.get("exp", 0)) < int(utc_now().timestamp()):
-        raise ValueError("token_expired")
-    return payload
-
-
-def extract_usage(response: Any) -> dict[str, int]:
-    usage = getattr(response, "usage", None)
-    if not usage:
-        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    total_tokens = int(getattr(usage, "total_tokens", prompt_tokens + completion_tokens) or 0)
-    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens}
-
-
-def estimate_text_tokens(text: str) -> int:
-    if not text:
-        return 0
-    ascii_words = re.findall(r"[A-Za-z0-9_]+", text)
-    cjk_chars = re.findall(r"[\u4e00-\u9fff]", text)
-    other_chars = max(len(text) - sum(len(word) for word in ascii_words) - len(cjk_chars), 0)
-    return max(1, len(ascii_words) + len(cjk_chars) + other_chars // 4)
-
-
-def extract_langchain_usage(message: Any, prompt: str = "", answer: str = "") -> dict[str, int]:
-    usage = getattr(message, "usage_metadata", None) or {}
-    if usage:
-        input_tokens = int(usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
-        output_tokens = int(usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0)
-        total_tokens = int(usage.get("total_tokens", input_tokens + output_tokens) or 0)
-        return {"prompt_tokens": input_tokens, "completion_tokens": output_tokens, "total_tokens": total_tokens}
-
-    response_metadata = getattr(message, "response_metadata", None) or {}
-    token_usage = response_metadata.get("token_usage") or response_metadata.get("usage") or {}
-    if token_usage:
-        prompt_tokens = int(token_usage.get("prompt_tokens", 0) or token_usage.get("input_tokens", 0) or 0)
-        completion_tokens = int(token_usage.get("completion_tokens", 0) or token_usage.get("output_tokens", 0) or 0)
-        total_tokens = int(token_usage.get("total_tokens", prompt_tokens + completion_tokens) or 0)
-        return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens}
-
-    prompt_tokens = estimate_text_tokens(prompt)
-    completion_tokens = estimate_text_tokens(answer)
-    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens}
-
-
-def add_token_usage(current: dict[str, int], delta: dict[str, int]) -> dict[str, int]:
-    keys = set(current) | set(delta) | {"prompt_tokens", "completion_tokens", "total_tokens"}
-    merged = {key: int(current.get(key, 0)) + int(delta.get(key, 0)) for key in keys}
-    if not merged.get("total_tokens"):
-        merged["total_tokens"] = int(merged.get("embedding_tokens", 0)) + int(merged.get("prompt_tokens", 0)) + int(merged.get("completion_tokens", 0))
-    return merged
-
-
-def estimate_cost(settings: Settings, usage: dict[str, int]) -> float:
-    prompt_cost = (usage.get("prompt_tokens", 0) / 1000.0) * settings.llm_prompt_cost_per_1k
-    completion_cost = (usage.get("completion_tokens", 0) / 1000.0) * settings.llm_completion_cost_per_1k
-    return round(prompt_cost + completion_cost, 8)
-
-
-def estimate_cost_breakdown(settings: Settings, usage: dict[str, int]) -> dict[str, float]:
-    embedding_cost = (usage.get("embedding_tokens", 0) / 1000.0) * settings.embedding_cost_per_1k
-    prompt_cost = (usage.get("prompt_tokens", 0) / 1000.0) * settings.llm_prompt_cost_per_1k
-    completion_cost = (usage.get("completion_tokens", 0) / 1000.0) * settings.llm_completion_cost_per_1k
-    total = embedding_cost + prompt_cost + completion_cost
-    return {
-        "embedding_cost_usd": round(embedding_cost, 8),
-        "prompt_cost_usd": round(prompt_cost, 8),
-        "completion_cost_usd": round(completion_cost, 8),
-        "total_cost_usd": round(total, 8),
-    }
-
-
-def timed_call(fn, *args, **kwargs):
-    start = time.perf_counter()
-    result = fn(*args, **kwargs)
-    duration_ms = round((time.perf_counter() - start) * 1000, 2)
-    return result, duration_ms
 
 
 class RedisRuntime:
@@ -769,38 +459,6 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_at: str
     user: AuthUser
-
-
-class PermissionPolicy:
-    ROLE_PERMISSIONS = {
-        "viewer": {"rag:read", "overview:read"},
-        "analyst": {"rag:read", "overview:read", "data:query", "risk:read", "audit:read"},
-        "supervisor": {"rag:read", "overview:read", "data:query", "risk:read", "audit:read", "case:review"},
-    }
-    MODE_PERMISSION = {
-        "function_call_agent": "data:query",
-        "sql_rag_chain": "data:query",
-        "router_demo": "data:query",
-        "auto": "data:query",
-        "langchain_rag": "rag:read",
-    }
-
-    @classmethod
-    def permissions_for(cls, role: str) -> set[str]:
-        return cls.ROLE_PERMISSIONS.get(role, set())
-
-    @classmethod
-    def can_use_mode(cls, role: str, mode: str) -> bool:
-        required = cls.MODE_PERMISSION.get(mode, "data:query")
-        return required in cls.permissions_for(role)
-
-    @classmethod
-    def can_read_audit(cls, role: str) -> bool:
-        return "audit:read" in cls.permissions_for(role)
-
-    @classmethod
-    def can_review_cases(cls, role: str) -> bool:
-        return "case:review" in cls.permissions_for(role)
 
 
 class SessionMemoryStore:
