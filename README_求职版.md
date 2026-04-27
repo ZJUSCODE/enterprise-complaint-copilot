@@ -128,6 +128,8 @@ supervisor@example.com / Supervisor@123
 docs/demo_script.md
 docs/interview_guide.md
 docs/ai_agent_job_hunting_guide_for_beginner.md
+docs/evaluation.md
+docs/agent_governance.md
 docs/mcp_server.md
 docs/deployment_ci.md
 deploy/README.md
@@ -155,9 +157,17 @@ deploy/README.md
 
 ## 验证结果
 
+快速检查：
+
+```powershell
+python scripts\demo_check.py
+```
+
+完整验收：
+
 ```text
 python -m py_compile app\runtime.py main.py: passed
-python -m pytest -q: 43 passed
+python -m pytest tests: 48 passed
 frontend npm run build: passed
 npm run test:e2e: 3 passed
 node scripts\capture_demo.js: passed
