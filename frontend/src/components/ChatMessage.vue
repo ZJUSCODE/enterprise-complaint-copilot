@@ -13,7 +13,7 @@
           </div>
           <span v-if="message.payload.latency_ms">{{ Math.round(message.payload.latency_ms) }} ms</span>
         </div>
-        <p class="answer-summary">{{ cleanText(message.payload.summary) }}</p>
+        <p class="answer-summary" v-html="highlightText(cleanText(message.payload.summary))"></p>
 
         <div v-if="message.payload.metrics?.length" class="metric-strip">
           <div v-for="metric in message.payload.metrics" :key="metric.label" class="mini-metric">
@@ -22,8 +22,13 @@
           </div>
         </div>
 
+        <MetricsPieChart
+          v-if="message.payload.metrics?.length >= 2"
+          :metrics="message.payload.metrics"
+        />
+
         <ul v-if="message.payload.highlights?.length" class="highlight-list">
-          <li v-for="item in message.payload.highlights.slice(0, 4)" :key="item">{{ cleanText(item) }}</li>
+          <li v-for="item in message.payload.highlights.slice(0, 4)" :key="item" v-html="highlightText(cleanText(item))"></li>
         </ul>
 
         <el-table v-if="message.payload.table?.length" :data="message.payload.table.slice(0, 5)" size="small" class="result-table">
@@ -34,6 +39,15 @@
             <template #default="{ row }">{{ formatMoney(row.compensation_amount) }}</template>
           </el-table-column>
         </el-table>
+
+        <div v-if="message.payload.table?.length" class="table-actions">
+          <button type="button" class="text-link" @click="exportTableCsv(message.payload.table, message.payload.request_id)">
+            导出数据
+          </button>
+          <button v-if="message.payload.sql_preview" type="button" class="text-link" @click="emit('show-sql')">
+            查看底层 SQL 代码
+          </button>
+        </div>
 
         <div v-if="message.payload.request_id" class="request-foot">
           request_id: {{ message.payload.request_id }}
@@ -60,10 +74,13 @@
 import type { ChatMessageState } from '@/stores/chat';
 import type { TokenUsage } from '@/types/api';
 import { formatMoney, workflowLabel } from '@/utils/format';
+import MetricsPieChart from '@/components/MetricsPieChart.vue';
 
 defineProps<{
   message: ChatMessageState;
 }>();
+
+const emit = defineEmits<{ (e: 'show-sql'): void }>();
 
 function tokenLine(usage: TokenUsage) {
   const parts = [
@@ -88,4 +105,55 @@ function cleanText(value?: string) {
     .replace(/^\s*[-*]\s+/gm, '')
     .trim();
 }
+
+function highlightText(input: string): string {
+  let result = input;
+  result = result.replace(/(\d+(?:\.\d+)?)\s*(元|单|条|笔|%)/g, '<strong>$1$2</strong>');
+  result = result.replace(/(3C数码|生鲜|服饰|美妆)/g, '<strong>$1</strong>');
+  result = result.replace(/(质量问题|物流延误|包装破损|仅退款)/g, '<strong>$1</strong>');
+  result = result.replace(/(人工复核|主管复核|升级|拦截)/g, '<strong>$1</strong>');
+  return result;
+}
+
+function exportTableCsv(table: Record<string, unknown>[], requestId?: string) {
+  if (!table.length) return;
+  const headers = Object.keys(table[0]);
+  const csvRows = [headers.join(',')];
+  for (const row of table) {
+    csvRows.push(headers.map((h) => String(row[h] ?? '')).join(','));
+  }
+  const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `copilot_export_${(requestId || 'data').slice(0, 8)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 </script>
+
+<style scoped>
+.answer-summary :deep(strong),
+.highlight-list :deep(strong) {
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.table-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+.table-actions .text-link {
+  background: none;
+  border: none;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  text-decoration: underline;
+}
+.table-actions .text-link:hover {
+  color: var(--el-color-primary-light-3);
+}
+</style>

@@ -87,11 +87,11 @@
             从今日风险开始
           </button>
         </section>
-        <ChatMessage v-for="message in chat.messages" :key="message.id" :message="message" />
+        <ChatMessage v-for="message in chat.messages" :key="message.id" :message="message" @show-sql="handleShowSql" />
       </div>
     </section>
 
-    <EvidenceRail :message="chat.latestAnswer" />
+    <EvidenceRail ref="evidenceRailRef" :message="chat.latestAnswer" />
   </div>
 </template>
 
@@ -111,6 +111,13 @@ const chat = useChatStore();
 const draft = ref('');
 const conversationRef = ref<HTMLDivElement | null>(null);
 const consumedQuery = ref(false);
+const evidenceRailRef = ref<InstanceType<typeof EvidenceRail> | null>(null);
+
+function handleShowSql() {
+  if (evidenceRailRef.value) {
+    evidenceRailRef.value.openSqlPanel();
+  }
+}
 
 const modes: Array<{ value: ChatMode; label: string; hint: string }> = [
   { value: 'auto', label: '自动', hint: '系统会自动判断该查数据、查 SOP，还是走复合链路。' },

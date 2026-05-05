@@ -21,6 +21,16 @@
       <el-collapse v-if="hasEvidence" v-model="openPanels" class="evidence-collapse">
         <el-collapse-item v-if="message.sql_preview" title="SQL 预览" name="sql">
           <SqlPreview :sql="message.sql_preview" />
+          <div class="sql-actions">
+            <button
+              v-if="message?.table?.length"
+              type="button"
+              class="text-link"
+              @click="exportTableCsv(message.table, message.request_id)"
+            >
+              导出数据
+            </button>
+          </div>
         </el-collapse-item>
         <el-collapse-item v-if="message.citations?.length" title="SOP 引用" name="citations">
           <RagCitations :items="message.citations" />
@@ -87,4 +97,43 @@ watch(
   },
   { immediate: true },
 );
+
+function exportTableCsv(table: Record<string, unknown>[], requestId?: string) {
+  if (!table.length) return;
+  const headers = Object.keys(table[0]);
+  const csvRows = [headers.join(',')];
+  for (const row of table) {
+    csvRows.push(headers.map((h) => String(row[h] ?? '')).join(','));
+  }
+  const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `copilot_export_${(requestId || 'data').slice(0, 8)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+defineExpose({
+  openSqlPanel() {
+    if (!openPanels.value.includes('sql')) {
+      openPanels.value = [...openPanels.value, 'sql'];
+    }
+  },
+});
 </script>
+
+<style scoped>
+.sql-actions {
+  margin-top: 8px;
+}
+.sql-actions .text-link {
+  background: none;
+  border: none;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  text-decoration: underline;
+}
+</style>

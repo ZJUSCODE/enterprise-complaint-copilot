@@ -355,6 +355,42 @@ def feedback(request: FeedbackRequest, current_user: dict[str, Any] | None = Dep
     return {"item": item}
 
 
+@app.get("/api/feedback/export")
+def feedback_export(limit: int = 100, role: Literal["viewer", "analyst", "supervisor"] = "viewer", current_user: dict[str, Any] | None = Depends(optional_current_user)) -> StreamingResponse:
+    resolved_role = resolve_role(role, current_user)
+    if not PermissionPolicy.can_read_audit(resolved_role):
+        return JSONResponse(status_code=403, content={"error": {"code": "permission_denied", "message": f"当前角色 {resolved_role} 无权导出 SFT 数据。"}})
+    runtime = get_runtime()
+    normalized_limit = max(1, min(limit, 1000))
+    feedback_items = runtime.feedback_events.recent(normalized_limit)
+    audit_items = runtime.audit_log.recent(normalized_limit)
+    audit_map = {item["request_id"]: item for item in audit_items}
+    lines = []
+    for fb in feedback_items:
+        audit = audit_map.get(fb["request_id"], {})
+        user_message = audit.get("user_message", "")
+        response_title = audit.get("response_title", "")
+        sft_row = {
+            "messages": [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": response_title},
+            ],
+            "rating": fb["rating"],
+            "comment": fb.get("comment"),
+            "request_id": fb["request_id"],
+            "session_id": fb.get("session_id"),
+            "user_role": fb.get("user_role", "analyst"),
+            "created_at": fb.get("created_at"),
+        }
+        lines.append(json.dumps(sft_row, ensure_ascii=False))
+    body = "\n".join(lines) + "\n" if lines else ""
+    return StreamingResponse(
+        iter([body]),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": 'attachment; filename="sft_feedback_export.jsonl"'},
+    )
+
+
 @app.post("/api/langgraph/chat")
 def langgraph_chat(request: ChatRequest, current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
     role = resolve_role(request.role, current_user)
