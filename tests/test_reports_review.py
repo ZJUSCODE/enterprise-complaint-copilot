@@ -16,14 +16,6 @@ def test_daily_risk_report_endpoint_returns_mock_broadcast():
     assert "每日异常播报" in payload["markdown"]
 
 
-def test_review_center_page_is_available():
-    client = TestClient(main.app)
-    response = client.get("/legacy-review")
-    assert response.status_code == 200
-    assert "审批中心模拟页" in response.text
-    assert "/static/review.js" in response.text
-
-
 def test_review_queue_status_flow():
     client = TestClient(main.app)
     chat_response = client.post(

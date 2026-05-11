@@ -53,6 +53,9 @@ jobs:
       - name: Unit tests
         run: python -m pytest -q
 
+      - name: Agent evaluation (offline, no LLM key needed)
+        run: python scripts/evaluate_rag.py --force-lexical
+
       - name: Frontend build
         working-directory: frontend
         run: npm run build

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
 import chromadb
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from app.config import Settings, VECTOR_DIR
+from app.config import Settings, KB_DIR, VECTOR_DIR
 from app.utils import (
     estimate_cost_breakdown,
     estimate_text_tokens,
@@ -16,6 +18,52 @@ from app.utils import (
     lexical_overlap_score,
     summarize_text,
 )
+
+
+def _load_and_chunk_markdown_docs(kb_dir: Path) -> tuple[list[str], list[dict], list[str]]:
+    """Load *.md files from kb_dir, split into chunks for vector indexing."""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=300,
+        chunk_overlap=50,
+        separators=["\n## ", "\n\n", "\n", "。", "；", " "],
+        keep_separator=True,
+    )
+    all_texts: list[str] = []
+    all_metadatas: list[dict] = []
+    all_ids: list[str] = []
+    chunk_counter = 0
+
+    for md_file in sorted(kb_dir.glob("*.md")):
+        if md_file.name.lower().startswith("readme"):
+            continue
+        content = md_file.read_text(encoding="utf-8")
+        chunks = splitter.split_text(content)
+        if not chunks:
+            continue
+        name_lower = md_file.name.lower()
+        first_heading = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+        doc_title = first_heading.group(1).strip() if first_heading else md_file.stem
+        category = "售后" if "after_sales" in name_lower else "物流" if "logistics" in name_lower else "生鲜" if "fresh" in name_lower else "通用"
+
+        for chunk in chunks:
+            chunk_counter += 1
+            headings = re.findall(r"^##\s+(.+)$", chunk, re.MULTILINE)
+            section_title = headings[-1].strip() if headings else ""
+            chunk_id = f"{md_file.stem}_chunk_{chunk_counter:03d}"
+            title = section_title or doc_title
+            citation = f"{md_file.name} > {section_title}" if section_title else md_file.name
+            all_texts.append(chunk)
+            all_metadatas.append({
+                "doc_id": chunk_id,
+                "title": title,
+                "category": category,
+                "citation": citation,
+                "source_file": md_file.name,
+                "section_title": section_title,
+            })
+            all_ids.append(chunk_id)
+
+    return all_texts, all_metadatas, all_ids
 
 
 class PolicyKnowledgeBase:
@@ -69,9 +117,15 @@ class LangChainRAGService:
                 if not settings.auto_build_vector_store:
                     self.error = "向量库为空。请运行 scripts/build_openai_vector_store.py 构建；当前使用本地规则检索。"
                     return
+                # Part 1: policies.json (structured, no chunking)
                 texts = [f"{doc['title']}\n类别：{doc['category']}\n摘要：{doc['excerpt']}\n规则：{'；'.join(doc['guidance'])}" for doc in knowledge_base.documents]
                 metadatas = [{"doc_id": doc["id"], "title": doc["title"], "category": doc["category"], "citation": doc["citation"]} for doc in knowledge_base.documents]
                 ids = [doc["id"] for doc in knowledge_base.documents]
+                # Part 2: markdown SOP docs (chunked)
+                md_texts, md_metadatas, md_ids = _load_and_chunk_markdown_docs(KB_DIR)
+                texts.extend(md_texts)
+                metadatas.extend(md_metadatas)
+                ids.extend(md_ids)
                 vectors = self.embeddings.embed_documents(texts)
                 self.collection.add(ids=ids, documents=texts, metadatas=metadatas, embeddings=vectors)
             self.llm = ChatOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, model=settings.llm_model, temperature=0)

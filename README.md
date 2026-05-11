@@ -1,3 +1,5 @@
+[![CI](https://github.com/ZJUSCODE/enterprise-complaint-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/ZJUSCODE/enterprise-complaint-copilot/actions/workflows/ci.yml)
+
 # 企业级智能客诉预警与数据洞察 Copilot
 
 这是一个面向 AI 应用 / AI Agent / 全栈 AI 工程岗位的企业级 Agent 项目。它不是普通聊天框，而是把大模型放进一个受控业务流程里：自然语言目标、JWT/RBAC、Guardrail、自动路由、工具调用、只读 SQL、SOP RAG、LangGraph 工作流、人工复核、审计追踪、token/cost 可观测。
@@ -162,6 +164,7 @@ python scripts\demo_check.py
 ```powershell
 python -m py_compile app\runtime.py main.py
 python -m pytest tests
+python scripts\evaluate_rag.py --force-lexical
 cd frontend
 npm run build
 cd ..
@@ -170,10 +173,13 @@ cd ..
 当前基线：
 
 ```text
-pytest: 48 passed
+pytest: 46 passed
+evaluation: 57 cases, route 86.7%, tool 80%, guardrail 83.3%, RAG 100%
 demo_check: passed
 frontend npm run build: passed
 ```
+
+评测由 CI 自动运行（`.github/workflows/ci.yml`），结果可在 Actions 历史中查看，不依赖手写报告。
 
 ## Docker
 
@@ -187,13 +193,23 @@ docker compose up --build
 
 ## Demo 产物
 
-```text
-output/playwright/v2-login.png
-output/playwright/v2-home.png
-output/playwright/v2-copilot-logistics.png
-output/playwright/copilot-demo.gif
-output/playwright/acceptance-report.json
-```
+### 登录页
+
+![登录页](docs/images/v2-login.png)
+
+### 首页
+
+![首页](docs/images/v2-home.png)
+
+### Copilot 物流查询
+
+![Copilot 物流查询](docs/images/v2-copilot-logistics.png)
+
+### 演示动图
+
+![演示动图](docs/images/copilot-demo.gif)
+
+验收报告：`output/playwright/acceptance-report.json`
 
 ## 边界说明
 

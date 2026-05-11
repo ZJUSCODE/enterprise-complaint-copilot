@@ -1,6 +1,6 @@
 # Agent 评测说明
 
-这份评测用于证明项目不是只靠人工演示的聊天框，而是把 Agent 能力拆成可验收指标。当前评测集覆盖 50 个 case，离线模式不依赖真实 LLM Key，方便 CI、面试现场和本地复现。
+这份评测用于证明项目不是只靠人工演示的聊天框，而是把 Agent 能力拆成可验收指标。当前评测集覆盖 57 个 case，离线模式不依赖真实 LLM Key，方便 CI、面试现场和本地复现。
 
 ## 评测目标
 
@@ -77,19 +77,25 @@ eval/v2_eval_report.md
 当前报告 `eval/v2_eval_report.json` 记录：
 
 ```text
-all_cases: 50
-route_accuracy: 1.0
-tool_selection_accuracy: 1.0
-citation_hit_rate: 1.0
+all_cases: 57
+route_accuracy: 0.8667 (13/15)
+tool_selection_accuracy: 0.8 (8/10)
+citation_hit_rate: 1.0 (18/18)
 rag_case_success_rate: 1.0
 negative_abstention_rate: 1.0
-guardrail_interception: 1.0
-memory_followup_accuracy: 1.0
+guardrail_interception: 0.8333 (10/12)
+memory_followup_accuracy: 1.0 (2/2)
 retry_success_rate: 1.0
 evaluation_mode: lexical_offline
 ```
 
-这些指标不是生产 SLA，只代表当前样本集下的离线验收结果。面试时建议明确说明：当前项目是求职展示级原型，评测重点是验证 Agent 链路、工具边界、RAG 引用和安全拦截，而不是声称已经覆盖真实线上分布。
+未通过的 case 揭示了系统的真实边界：
+
+- **路由歧义**：模糊的通用问题（"最近的售后情况怎么样？"）因缺少关键词命中，回退到默认路由而非 RAG；英文混合查询中 "statistics" 未纳入查询模式，导致路由偏差。
+- **工具选择冲突**：当问题同时包含退款金额和 SOP 依据时，确定性回退逻辑优先匹配退款查询而非政策检索。
+- **Guardrail 社工盲区**：基于关键词的拦截规则无法识别不包含明确写操作指令的社会工程攻击（如"把退款额度调到5000元"）。
+
+这些指标不是生产 SLA，只代表当前样本集下的离线验收结果。面试时建议明确说明：当前项目是求职展示级原型，评测重点是验证 Agent 链路、工具边界、RAG 引用和安全拦截，而不是声称已经覆盖真实线上分布。失败的 case 反而可以作为面试讨论点，说明你理解系统的局限性和改进方向。
 
 ## 如何扩展
 

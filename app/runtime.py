@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import (
@@ -20,8 +20,6 @@ from app.config import (
     BASE_DIR,
     FRONTEND_ASSETS_DIR,
     FRONTEND_DIST_DIR,
-    STATIC_DIR,
-    TEMPLATE_DIR,
     logger,
 )
 from app.domain import COMPLAINT_PATTERNS, POLICY_PATTERNS, contains_any
@@ -47,14 +45,12 @@ from app.ticket_store import (
 )
 from app.utils import (
     SQL_FORBIDDEN_KEYWORDS,
+    lexical_overlap_score,
     safe_json_loads,
     summarize_text,
     timed_call,
     validate_readonly_sql,
 )
-
-def load_template(name: str) -> str:
-    return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
 
 
 def __getattr__(name: str) -> Any:
@@ -70,7 +66,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=APP_TITLE, lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if FRONTEND_ASSETS_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="frontend-assets")
 
@@ -88,13 +83,6 @@ def cached_response(key: str, ttl_seconds: int, builder):
 def frontend_index_path() -> Path | None:
     index_path = FRONTEND_DIST_DIR / "index.html"
     return index_path if index_path.exists() else None
-
-
-def vue_app_or_template(template_name: str):
-    index_path = frontend_index_path()
-    if index_path:
-        return FileResponse(index_path)
-    return HTMLResponse(load_template(template_name))
 
 
 @app.middleware("http")
@@ -158,22 +146,18 @@ def auth_me(current_user: dict[str, Any] = Depends(require_current_user)) -> dic
 
 @app.get("/")
 async def index():
-    return vue_app_or_template("index.html")
-
-
-@app.get("/legacy", response_class=HTMLResponse)
-async def legacy_index() -> HTMLResponse:
-    return HTMLResponse(load_template("index.html"))
-
-
-@app.get("/legacy-review", response_class=HTMLResponse)
-async def legacy_review_center() -> HTMLResponse:
-    return HTMLResponse(load_template("review.html"))
+    index_path = frontend_index_path()
+    if index_path:
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Frontend not built. Run: cd frontend && npm run build"})
 
 
 @app.get("/review")
 async def review_center():
-    return vue_app_or_template("review.html")
+    index_path = frontend_index_path()
+    if index_path:
+        return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Frontend not built. Run: cd frontend && npm run build"})
 
 
 @app.get("/api/overview")

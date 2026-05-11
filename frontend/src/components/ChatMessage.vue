@@ -98,8 +98,17 @@ function formatCost(value?: number) {
   return `$${Number(value || 0).toFixed(6)}`;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function cleanText(value?: string) {
-  return String(value || '')
+  return escapeHtml(String(value || ''))
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/^\s*[-*]\s+/gm, '')

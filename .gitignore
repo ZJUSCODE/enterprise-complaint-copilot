@@ -23,8 +23,7 @@ chroma_openai/
 .idea/
 roots.sst
 
-# Generated screenshots and interview export artifacts
-*.png
+# Generated interview export artifacts
 *.docx
 output/
 
@@ -38,3 +37,6 @@ node_modules/
 test-results/
 playwright-report/
 frontend/dist/
+
+# Superpowers skill artifacts
+docs/superpowers/
