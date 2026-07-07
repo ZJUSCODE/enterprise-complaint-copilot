@@ -14,8 +14,13 @@ pytest-cache-files-*/
 
 # Local databases, vector stores, and model artifacts
 *.sqlite3
+*.sqlite
+*.db
+*.duckdb
+*.parquet
 chroma_db/
 chroma_openai/
+storage/
 *.pkl
 
 # Browser/IDE generated files
@@ -26,6 +31,7 @@ roots.sst
 # Generated interview export artifacts
 *.docx
 output/
+logs/
 
 # Virtual environments
 .venv/
