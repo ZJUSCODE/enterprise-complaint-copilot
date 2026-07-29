@@ -440,9 +440,9 @@ a {
 
 .workbench-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.75fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.7fr);
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .workbench-copy,
@@ -458,8 +458,8 @@ a {
 }
 
 .workbench-copy {
-  min-height: 310px;
-  padding: 34px;
+  min-height: 230px;
+  padding: 28px;
   background:
     linear-gradient(135deg, rgba(227, 243, 239, 0.94), rgba(255, 255, 255, 0.98) 48%),
     var(--surface);
@@ -468,8 +468,8 @@ a {
 .workbench-copy h1 {
   max-width: 760px;
   margin: 0;
-  font-size: 44px;
-  line-height: 1.08;
+  font-size: 36px;
+  line-height: 1.12;
 }
 
 .workbench-copy p {
@@ -483,8 +483,8 @@ a {
 .ops-panel {
   display: grid;
   align-content: space-between;
-  min-height: 310px;
-  padding: 22px;
+  min-height: 230px;
+  padding: 20px;
 }
 
 .ops-panel-head span,
@@ -512,35 +512,36 @@ a {
 
 .ops-metrics div {
   min-width: 0;
-  padding: 12px;
-  background: #fbfcfd;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+.ops-metrics div + div {
+  border-left: 1px solid var(--line);
 }
 
 .ops-metrics strong {
   display: block;
   margin-top: 6px;
   overflow-wrap: anywhere;
-  font-size: 22px;
+  font-size: 19px;
 }
 
 .operations-grid {
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
-  margin: 18px 0;
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+  margin: 16px 0 20px;
 }
 
 .queue-panel,
 .command-panel,
 .audit-board {
-  padding: 20px;
+  padding: 18px;
 }
 
 .queue-list,
 .command-list,
 .audit-board {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .queue-item,
@@ -548,8 +549,8 @@ a {
   display: grid;
   gap: 6px;
   width: 100%;
-  min-height: 96px;
-  padding: 14px;
+  min-height: 78px;
+  padding: 12px;
   text-align: left;
   cursor: pointer;
   background: #fbfcfd;
@@ -565,7 +566,31 @@ a {
 
 .queue-item strong,
 .command-list strong {
-  font-size: 18px;
+  font-size: 16px;
+}
+
+.queue-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.queue-item small {
+  grid-column: 1 / -1;
+}
+
+.command-list button {
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+}
+
+.command-list button > span {
+  grid-row: 1 / 3;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.command-list button > small {
+  grid-column: 2;
 }
 
 .system-grid {

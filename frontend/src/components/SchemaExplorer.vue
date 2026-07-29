@@ -50,6 +50,6 @@ const props = defineProps<{
   schema: SchemaCatalog;
 }>();
 
-const activeNames = ref(['metrics']);
+const activeNames = ref<string[]>([]);
 const table = computed(() => props.schema.tables[0]);
 </script>

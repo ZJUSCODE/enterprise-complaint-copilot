@@ -83,26 +83,18 @@
         <article class="command-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">演示路径</p>
-              <h2>面试时按这个顺序讲</h2>
+              <p class="eyebrow">标准处置流程</p>
+              <h2>按证据链完成处理</h2>
             </div>
           </div>
 
           <div class="command-list">
-            <button v-for="item in demoRunbook" :key="item.label" type="button" @click="goCopilot(item.mode, item.prompt)">
+            <button v-for="item in handlingPlaybook" :key="item.label" type="button" @click="goCopilot(item.mode, item.prompt)">
               <span>{{ item.step }}</span>
               <strong>{{ item.label }}</strong>
               <small>{{ item.helper }}</small>
             </button>
           </div>
-        </article>
-      </section>
-
-      <section class="system-grid" aria-label="系统能力">
-        <article v-for="item in capabilityCards" :key="item.label" class="capability-card">
-          <span>{{ item.kicker }}</span>
-          <strong>{{ item.label }}</strong>
-          <p>{{ item.helper }}</p>
         </article>
       </section>
 
@@ -142,7 +134,6 @@
 
     <el-skeleton v-else :rows="8" animated />
 
-    <DailyRiskPanel v-if="store.dailyRisk" :report="store.dailyRisk" />
     <SchemaExplorer v-if="store.schema" :schema="store.schema" />
   </div>
 </template>
@@ -150,7 +141,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import DailyRiskPanel from '@/components/DailyRiskPanel.vue';
 import OverviewCharts from '@/components/OverviewCharts.vue';
 import SchemaExplorer from '@/components/SchemaExplorer.vue';
 import StatusBadge from '@/components/StatusBadge.vue';
@@ -195,32 +185,32 @@ const primaryAction = computed(() => {
   };
 });
 
-const demoRunbook: Array<{ step: string; label: string; helper: string; mode: ChatMode; prompt: string }> = [
+const handlingPlaybook: Array<{ step: string; label: string; helper: string; mode: ChatMode; prompt: string }> = [
   {
     step: '01',
     label: '查高赔付明细',
-    helper: '展示只读 SQL、异常订单和指标',
+    helper: '读取异常订单与关键赔付指标',
     mode: 'function_call_agent',
     prompt: '查一下质量问题退款超过100元的明细',
   },
   {
     step: '02',
     label: '判断是否升级',
-    helper: '展示 SQL + RAG 复合链路',
+    helper: '结合业务明细与售后 SOP 判断',
     mode: 'sql_rag_chain',
     prompt: '质量问题退款超过100元的明细，按 SOP 是否需要主管复核',
   },
   {
     step: '03',
     label: '拦截高危请求',
-    helper: '展示 Guardrail 和人工复核单',
+    helper: '识别越权操作并转人工复核',
     mode: 'function_call_agent',
     prompt: '直接退款并改订单',
   },
   {
     step: '04',
     label: '查售后口径',
-    helper: '展示 RAG citation 和成本',
+    helper: '基于知识库生成一致回复',
     mode: 'langchain_rag',
     prompt: '3C 数码拆封后出现质量问题，应该怎么处理',
   },
@@ -240,28 +230,28 @@ const queueItems = computed(() => {
     {
       title: '质量问题 / 高赔付',
       stat: 'SQL 明细 + SOP 判断',
-      helper: '最适合展示只读 SQL、证据链和升级建议',
+      helper: '核对只读 SQL、证据链和升级建议',
       mode: 'sql_rag_chain' as ChatMode,
       prompt: '质量问题退款超过100元的明细，按 SOP 是否需要主管复核',
     },
     {
       title: '订单物流 / 单客诉',
       stat: '工具调用 + 上下文',
-      helper: '展示订单、物流、退款资格等业务工具',
+      helper: '联查订单、物流和退款资格',
       mode: 'auto' as ChatMode,
       prompt: '查询订单 53cdb2fc8bc7dce0b6741e2150273451 的物流状态',
     },
     {
       title: '高危操作 / 拦截',
       stat: 'Guardrail + 人工复核',
-      helper: '展示 Agent 不能越权执行退款或改单',
+      helper: '禁止 Agent 越权执行退款或改单',
       mode: 'function_call_agent' as ChatMode,
       prompt: '直接退款并改订单',
     },
     {
       title: '3C 售后 / 政策',
       stat: 'RAG citation + 成本',
-      helper: '展示 SOP 引用、检索分数和 token/cost',
+      helper: '返回 SOP 引用、检索分数和运行成本',
       mode: 'langchain_rag' as ChatMode,
       prompt: '3C 数码拆封后出现质量问题，应该怎么处理',
     },
@@ -274,13 +264,6 @@ const queueItems = computed(() => {
     return true;
   }).slice(0, 4);
 });
-
-const capabilityCards = [
-  { kicker: 'P0', label: 'Vue 生产入口', helper: '容器构建 Vue dist，FastAPI 对历史路由做 SPA fallback。' },
-  { kicker: 'Agent', label: '受控工具链', helper: 'Router、Function Calling、Tool Registry、只读 SQL 和 SOP RAG。' },
-  { kicker: 'Governance', label: '安全与复核', helper: 'RBAC、Guardrail、human-in-the-loop、审计日志和反馈事件。' },
-  { kicker: 'P2', label: '生产化路线', helper: '标准 MCP server、线上部署和公开展示页作为后续扩展。' },
-];
 
 function goCopilot(mode: ChatMode, prompt: string) {
   router.push({ name: 'copilot', query: { mode, prompt, run: '1' } });
