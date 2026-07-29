@@ -4,15 +4,15 @@
       <div class="login-copy">
         <p class="eyebrow">进入工作台</p>
         <h1>选择身份后继续处理客诉。</h1>
-        <p>演示账号已准备好。运营分析用 analyst，审批流用 supervisor。</p>
-        <RouterLink class="text-link" to="/public">查看公开项目页</RouterLink>
+        <p>不同角色对应不同的数据与操作权限。运营分析使用 analyst，人工复核使用 supervisor。</p>
+        <RouterLink class="text-link" to="/public">了解平台能力</RouterLink>
       </div>
 
       <el-alert v-if="auth.error" :title="auth.error" type="error" show-icon />
 
-      <div class="demo-users">
+      <div class="role-options">
         <button
-          v-for="item in demoUsers"
+          v-for="item in roleOptions"
           :key="item.username"
           type="button"
           :class="{ active: username === item.username }"
@@ -48,7 +48,7 @@ const route = useRoute();
 const username = ref('analyst@example.com');
 const password = ref('Analyst@123');
 
-const demoUsers = [
+const roleOptions = [
   { role: 'viewer', intent: '只看风险和结论', username: 'viewer@example.com', password: 'Viewer@123' },
   { role: 'analyst', intent: '查询明细和生成判断', username: 'analyst@example.com', password: 'Analyst@123' },
   { role: 'supervisor', intent: '处理人工复核', username: 'supervisor@example.com', password: 'Supervisor@123' },
