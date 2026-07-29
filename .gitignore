@@ -46,3 +46,5 @@ frontend/dist/
 
 # Superpowers skill artifacts
 docs/superpowers/
+.superpowers/
+.worktrees/
