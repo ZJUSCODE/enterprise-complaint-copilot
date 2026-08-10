@@ -163,23 +163,20 @@ python scripts\demo_check.py
 
 ```powershell
 python -m py_compile app\runtime.py main.py
-python -m pytest tests
+python -m pytest tests -q
 python scripts\evaluate_rag.py --force-lexical
 cd frontend
+npm ls --depth=0
 npm run build
 cd ..
+npm ls --depth=0
+npm run test:e2e
+docker build -t complaint-copilot:ci .
 ```
 
-当前基线：
+测试总数不在 README 中手工维护。Python 的通过、失败、跳过和 warning 数来自同一干净 Python 3.12 环境生成的 JUnit XML 与 pytest 输出；评测样本总数来自 `eval/v2_eval_report.json` 的 `total.all_cases`，并必须等于各 `*_cases` 分类之和。完整验证后，`scripts/build_verification_handoff.py` 会生成不进入仓库的本地交接 JSON，供后续网站发布流程读取。
 
-```text
-pytest: 46 passed
-evaluation: 57 cases, route 86.7%, tool 80%, guardrail 83.3%, RAG 100%
-demo_check: passed
-frontend npm run build: passed
-```
-
-评测由 CI 自动运行（`.github/workflows/ci.yml`），结果可在 Actions 历史中查看，不依赖手写报告。
+GitHub Actions 必须完整通过 Python、离线评测、Vue build、Playwright、Docker build 和容器 smoke；任何前置步骤失败时，后续数字都不能作为当前证据。
 
 ## Docker
 
