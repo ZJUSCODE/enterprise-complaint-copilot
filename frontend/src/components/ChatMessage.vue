@@ -23,8 +23,8 @@
         </div>
 
         <MetricsPieChart
-          v-if="message.payload.metrics?.length >= 2"
-          :metrics="message.payload.metrics"
+          v-if="(message.payload.metrics?.length || 0) >= 2"
+          :metrics="message.payload.metrics || []"
         />
 
         <ul v-if="message.payload.highlights?.length" class="highlight-list">
@@ -72,7 +72,7 @@
 
 <script setup lang="ts">
 import type { ChatMessageState } from '@/stores/chat';
-import type { TokenUsage } from '@/types/api';
+import type { TicketRow, TokenUsage } from '@/types/api';
 import { formatMoney, workflowLabel } from '@/utils/format';
 import MetricsPieChart from '@/components/MetricsPieChart.vue';
 
@@ -124,12 +124,12 @@ function highlightText(input: string): string {
   return result;
 }
 
-function exportTableCsv(table: Record<string, unknown>[], requestId?: string) {
+function exportTableCsv(table: TicketRow[], requestId?: string) {
   if (!table.length) return;
   const headers = Object.keys(table[0]);
   const csvRows = [headers.join(',')];
   for (const row of table) {
-    csvRows.push(headers.map((h) => String(row[h] ?? '')).join(','));
+    csvRows.push(headers.map((h) => String(row[h as keyof TicketRow] ?? '')).join(','));
   }
   const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

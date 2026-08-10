@@ -47,18 +47,15 @@ jobs:
       - name: Python syntax check
         run: python -m py_compile app/runtime.py main.py
 
-      - name: JavaScript syntax check
-        run: node --check static/app.js && node --check static/review.js
+      - name: Frontend typecheck and production build
+        working-directory: frontend
+        run: npm run build
 
       - name: Unit tests
         run: python -m pytest -q
 
       - name: Agent evaluation (offline, no LLM key needed)
         run: python scripts/evaluate_rag.py --force-lexical
-
-      - name: Frontend build
-        working-directory: frontend
-        run: npm run build
 
       - name: Browser acceptance test
         run: npm run test:e2e

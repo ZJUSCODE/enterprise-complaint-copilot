@@ -67,7 +67,7 @@ import AgentFlow from '@/components/AgentFlow.vue';
 import RagCitations from '@/components/RagCitations.vue';
 import SqlPreview from '@/components/SqlPreview.vue';
 import ToolTrace from '@/components/ToolTrace.vue';
-import type { ChatResponse } from '@/types/api';
+import type { ChatResponse, TicketRow } from '@/types/api';
 import { reviewStatusLabel } from '@/utils/format';
 
 const props = defineProps<{
@@ -98,12 +98,12 @@ watch(
   { immediate: true },
 );
 
-function exportTableCsv(table: Record<string, unknown>[], requestId?: string) {
+function exportTableCsv(table: TicketRow[], requestId?: string) {
   if (!table.length) return;
   const headers = Object.keys(table[0]);
   const csvRows = [headers.join(',')];
   for (const row of table) {
-    csvRows.push(headers.map((h) => String(row[h] ?? '')).join(','));
+    csvRows.push(headers.map((h) => String(row[h as keyof TicketRow] ?? '')).join(','));
   }
   const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
