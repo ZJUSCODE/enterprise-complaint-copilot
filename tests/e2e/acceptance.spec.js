@@ -97,7 +97,20 @@ test("copilot core browser flows", async ({ page }) => {
   await page.getByRole("link", { name: "评测" }).click();
   await expect(page.getByRole("heading", { name: /把 Agent 能力变成可验收指标/ })).toBeVisible({ timeout: 30000 });
   await expect(page.getByText("Route Accuracy")).toBeVisible({ timeout: 30000 });
-  await expect(page.getByText("50 cases")).toBeVisible({ timeout: 30000 });
+  const evalReport = await page.evaluate(async () => {
+    const response = await fetch("/api/eval/report?role=analyst");
+    if (!response.ok) throw new Error(`Eval report request failed: ${response.status}`);
+    return response.json();
+  });
+  const categoryTotal = [
+    "rag_cases",
+    "route_cases",
+    "tool_cases",
+    "guardrail_cases",
+    "memory_cases",
+  ].reduce((sum, key) => sum + evalReport.total[key], 0);
+  expect(evalReport.total.all_cases).toBe(categoryTotal);
+  await expect(page.getByText(`${evalReport.total.all_cases} cases`, { exact: true })).toBeVisible({ timeout: 30000 });
   report.push({ step: "eval_report", ok: true });
 
   await page.getByRole("button", { name: "退出" }).click();

@@ -51,3 +51,10 @@ def test_ci_smokes_the_container_api_and_frontend() -> None:
     assert "http://127.0.0.1:8000/" in workflow
     assert "if: always()" in workflow
     assert "docker rm --force complaint-copilot-ci" in workflow
+
+
+def test_browser_acceptance_derives_eval_total_from_the_report() -> None:
+    source = (ROOT / "tests" / "e2e" / "acceptance.spec.js").read_text(encoding="utf-8")
+
+    assert 'getByText("50 cases")' not in source
+    assert "evalReport.total.all_cases" in source
