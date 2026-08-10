@@ -57,7 +57,9 @@ def read_junit_counts(path: Path) -> dict[str, int]:
 
 
 def read_warning_count(path: Path) -> int:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    data = path.read_bytes()
+    encoding = "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    text = data.decode(encoding, errors="replace")
     matches = re.findall(r"(?<![0-9])([0-9]+)\s+warnings?\b", text, flags=re.IGNORECASE)
     return int(matches[-1]) if matches else 0
 

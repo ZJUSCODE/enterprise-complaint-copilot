@@ -8,6 +8,7 @@ from scripts.build_verification_handoff import (
     EXPECTED_FIELDS,
     build_record,
     read_eval_cases,
+    read_warning_count,
     validate_record,
 )
 
@@ -52,6 +53,13 @@ def test_eval_total_must_equal_category_sum(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="evaluation total mismatch"):
         read_eval_cases(report)
+
+
+def test_warning_count_reads_powershell_utf16_log(tmp_path) -> None:
+    pytest_output = tmp_path / "pytest.log"
+    pytest_output.write_text("55 passed, 1 warning in 11.50s\n", encoding="utf-16")
+
+    assert read_warning_count(pytest_output) == 1
 
 
 def test_schema_rejects_extra_fields() -> None:
