@@ -60,6 +60,11 @@ class Settings:
     llm_prompt_cost_per_1k: float = 0.0
     llm_completion_cost_per_1k: float = 0.0
     embedding_cost_per_1k: float = 0.0
+    # 外部检索后端（WeKnora）：RETRIEVAL_BACKEND=weknora 时启用
+    retrieval_backend: str = "local"
+    weknora_base_url: str = ""
+    weknora_api_key: str = ""
+    weknora_kb_id: str = ""
 
     def __post_init__(self) -> None:
         self.llm_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
@@ -85,3 +90,7 @@ class Settings:
         self.llm_prompt_cost_per_1k = float(os.getenv("LLM_PROMPT_COST_PER_1K", "0"))
         self.llm_completion_cost_per_1k = float(os.getenv("LLM_COMPLETION_COST_PER_1K", "0"))
         self.embedding_cost_per_1k = float(os.getenv("EMBEDDING_COST_PER_1K", "0"))
+        self.retrieval_backend = os.getenv("RETRIEVAL_BACKEND", "local").strip().lower()
+        self.weknora_base_url = os.getenv("WEKNORA_BASE_URL", "").strip().rstrip("/")
+        self.weknora_api_key = os.getenv("WEKNORA_API_KEY", "").strip()
+        self.weknora_kb_id = os.getenv("WEKNORA_KB_ID", "").strip()

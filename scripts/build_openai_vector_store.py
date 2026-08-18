@@ -22,7 +22,7 @@ VECTOR_MANIFEST = "kb_manifest.json"
 
 def knowledge_base_hash(kb_dir: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted([kb_dir / "policies.json", *kb_dir.glob("*.md")]):
+    for path in sorted([kb_dir / "policies.json", *kb_dir.glob("**/*.md")]):
         if not path.exists() or path.name.lower().startswith("readme"):
             continue
         digest.update(path.name.encode("utf-8"))
@@ -50,15 +50,27 @@ def _extract_section_title(chunk_text: str) -> str:
     return headings[-1].strip() if headings else ""
 
 
-def _infer_category(filename: str, first_heading: str) -> str:
-    """Infer document category from filename or first heading."""
+def _infer_category(path: Path, filename: str, first_heading: str) -> str:
+    """Infer document category from filename, path or first heading."""
     name_lower = filename.lower()
-    if "after_sales" in name_lower or "售后" in first_heading:
+    rel = path.as_posix().lower()
+    rules = [
+        ("3c", "3C数码"), ("digital", "3C数码"), ("数码", "3C数码"),
+        ("fresh", "生鲜"), ("生鲜", "生鲜"),
+        ("food", "食品"), ("食品", "食品"),
+        ("apparel", "服饰"), ("服饰", "服饰"),
+        ("home", "家居"), ("furnishing", "家居"), ("家居", "家居"),
+        ("beauty", "美妆"), ("cosmetic", "美妆"), ("美妆", "美妆"),
+        ("logistics", "物流"), ("物流", "物流"),
+        ("refund", "退款"), ("退款", "退款"),
+    ]
+    for keyword, category in rules:
+        if keyword in name_lower or keyword in rel:
+            return category
+    if "售后" in first_heading:
         return "售后"
-    if "logistics" in name_lower or "物流" in first_heading:
+    if "物流" in first_heading:
         return "物流"
-    if "fresh" in name_lower or "生鲜" in name_lower or "生鲜" in first_heading:
-        return "生鲜"
     return "通用"
 
 
@@ -75,12 +87,12 @@ def load_markdown_docs(kb_dir: Path) -> tuple[list[str], list[dict], list[str]]:
     all_ids: list[str] = []
     chunk_counter = 0
 
-    for md_file in sorted(kb_dir.glob("*.md")):
+    for md_file in sorted(kb_dir.glob("**/*.md")):
         if md_file.name.lower().startswith("readme"):
             continue
         content = md_file.read_text(encoding="utf-8")
         chunks = splitter.split_text(content)
-        category = _infer_category(md_file.name, chunks[0] if chunks else "")
+        category = _infer_category(md_file.relative_to(kb_dir), md_file.name, chunks[0] if chunks else "")
         # Extract first heading for citation
         first_heading_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
         doc_title = first_heading_match.group(1).strip() if first_heading_match else md_file.stem
