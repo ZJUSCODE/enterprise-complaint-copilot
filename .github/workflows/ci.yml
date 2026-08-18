@@ -47,18 +47,15 @@ jobs:
       - name: Python syntax check
         run: python -m py_compile app/runtime.py main.py
 
-      - name: JavaScript syntax check
-        run: node --check static/app.js && node --check static/review.js
+      - name: Frontend typecheck and production build
+        working-directory: frontend
+        run: npm run build
 
       - name: Unit tests
         run: python -m pytest -q
 
       - name: Agent evaluation (offline, no LLM key needed)
         run: python scripts/evaluate_rag.py --force-lexical
-
-      - name: Frontend build
-        working-directory: frontend
-        run: npm run build
 
       - name: Browser acceptance test
         run: npm run test:e2e
@@ -73,3 +70,30 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t complaint-copilot:ci .
+
+      - name: Start Docker smoke container
+        run: |
+          docker run --detach --name complaint-copilot-ci --publish 8000:8000 \
+            --env AUTH_ENFORCED=false \
+            --env REDIS_ENABLED=false \
+            --env DATA_QUERY_BACKEND=sqlite \
+            complaint-copilot:ci
+
+      - name: Smoke API and frontend
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/api/health; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs complaint-copilot-ci
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8000/ > /tmp/complaint-index.html
+          grep --fixed-strings '<div id="app"></div>' /tmp/complaint-index.html
+
+      - name: Stop Docker smoke container
+        if: always()
+        run: docker rm --force complaint-copilot-ci || true

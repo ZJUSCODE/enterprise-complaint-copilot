@@ -47,8 +47,8 @@ http://127.0.0.1:4261
 - `Guardrail`：拦截退款、改单、删除、导出用户、prompt injection 等高危请求。
 - `Human Review`：高危或证据不足请求进入主管复核队列。
 - `Audit Center`：展示 request_id、trace_id、route、tool trace、SQL、latency、retry、token/cost。
-- `Eval Report`：展示 50 case route、tool、RAG citation、Guardrail、memory follow-up 指标。
-- `工程化验收`：pytest、Playwright 桌面/移动端 E2E、50 case eval、GitHub Actions、Dockerfile、Render 部署蓝图、demo GIF。
+- `Eval Report`：展示由评测报告动态给出的 route、tool、RAG citation、Guardrail、memory follow-up 指标与样本总数。
+- `工程化验收`：pytest、Playwright 桌面/移动端 E2E、可复现离线 eval、GitHub Actions、Dockerfile、Render 部署蓝图、demo GIF。
 
 ## 架构图
 
@@ -149,11 +149,11 @@ deploy/README.md
 - 实现 SQLite/MySQL 只读查询层与 SQL 安全校验，禁止模型直接执行任意 SQL，工具层通过参数化查询返回指标、明细、SQL preview 和 Tool Trace。
 - 构建 SOP RAG 与 SQL + RAG 复合推理链路，基于 citation、retrieval score、rerank score 和明细摘要生成可追溯回答。
 - 建立 Agent 治理能力，包括 Guardrail、高危请求拦截、human-in-the-loop 复核队列、反馈事件、审计日志、trace_id、retry_count、token usage 和 cost breakdown。
-- 搭建工程化验收体系，使用 pytest、Playwright 桌面/移动端 E2E、50 case eval、GitHub Actions CI、Docker build、Render 部署蓝图和自动截图/GIF 脚本覆盖核心演示路径。
+- 搭建工程化验收体系，使用 pytest、Playwright 桌面/移动端 E2E、可复现离线 eval、GitHub Actions CI、Docker build、Render 部署蓝图和自动截图/GIF 脚本覆盖核心演示路径。
 
 ## 30 秒面试讲法
 
-> 我做了一个企业级智能客诉 Copilot，用户可以用自然语言查询异常退款、订单物流、售后 SOP 和用户风险。系统通过 Auto Router 判断该走数据查询、政策检索还是 SQL + RAG 复合链路；数据查询由 Tool Registry 统一登记的 Function Calling 工具和只读 SQL 层完成，政策回答由 RAG 返回引用来源和分数。为了避免 Agent 越权，我加了 JWT/RBAC、Guardrail、只读 SQL 校验、审计日志和人工复核队列。前端用 Vue3 做成工作台，包含今日优先级、处理台、Agent 执行链路、审计中心和复核中心，并补了 pytest、Playwright E2E、50 case eval、CI、Docker 和 demo GIF。
+> 我做了一个企业级智能客诉 Copilot，用户可以用自然语言查询异常退款、订单物流、售后 SOP 和用户风险。系统通过 Auto Router 判断该走数据查询、政策检索还是 SQL + RAG 复合链路；数据查询由 Tool Registry 统一登记的 Function Calling 工具和只读 SQL 层完成，政策回答由 RAG 返回引用来源和分数。为了避免 Agent 越权，我加了 JWT/RBAC、Guardrail、只读 SQL 校验、审计日志和人工复核队列。前端用 Vue3 做成工作台，包含今日优先级、处理台、Agent 执行链路、审计中心和复核中心，并补了 pytest、Playwright E2E、可复现离线 eval、CI、Docker 和 demo GIF。
 
 ## 验证结果
 
@@ -167,10 +167,11 @@ python scripts\demo_check.py
 
 ```text
 python -m py_compile app\runtime.py main.py: passed
-python -m pytest tests: 48 passed
+python -m pytest tests -q: 以固定提交对应的绿色 CI 与本地验证交接记录为准
+python scripts\evaluate_rag.py --force-lexical: report generated and validated
 frontend npm run build: passed
-npm run test:e2e: 3 passed
-node scripts\capture_demo.js: passed
+npm run test:e2e: passed
+docker build + container smoke: passed
 ```
 
 Docker 镜像构建需要本机 Docker Desktop 可用。当前代码保留 Dockerfile 与 CI job，Docker 可用后运行：

@@ -1,6 +1,6 @@
 # Agent 评测说明
 
-这份评测用于证明项目不是只靠人工演示的聊天框，而是把 Agent 能力拆成可验收指标。当前评测集覆盖 57 个 case，离线模式不依赖真实 LLM Key，方便 CI、面试现场和本地复现。
+这份评测用于证明项目不是只靠人工演示的聊天框，而是把 Agent 能力拆成可验收指标。评测总数不在说明文档中手工维护；离线运行后以 `eval/v2_eval_report.json` 的 `total.all_cases` 为准，并校验它等于各 `*_cases` 分类之和。离线模式不依赖真实 LLM Key，方便 CI、面试现场和本地复现。
 
 ## 评测目标
 
@@ -74,20 +74,12 @@ eval/v2_eval_report.md
 
 ## 当前结果
 
-当前报告 `eval/v2_eval_report.json` 记录：
+运行 `python scripts\evaluate_rag.py --force-lexical` 会同时生成：
 
-```text
-all_cases: 57
-route_accuracy: 0.8667 (13/15)
-tool_selection_accuracy: 0.8 (8/10)
-citation_hit_rate: 1.0 (18/18)
-rag_case_success_rate: 1.0
-negative_abstention_rate: 1.0
-guardrail_interception: 0.8333 (10/12)
-memory_followup_accuracy: 1.0 (2/2)
-retry_success_rate: 1.0
-evaluation_mode: lexical_offline
-```
+- `eval/v2_eval_report.json`：机器可读总数、分类计数、指标和逐类结果。
+- `eval/v2_eval_report.md`：由同一次运行生成的人类可读报告。
+
+验收时必须断言 `total.all_cases` 等于所有分类 `*_cases` 之和；README、Playwright 和网站发布流程不得另行维护样本总数。
 
 未通过的 case 揭示了系统的真实边界：
 

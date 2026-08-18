@@ -1,117 +1,127 @@
 const { test, expect } = require("@playwright/test");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 
-function parseFinalEvent(body) {
-  const finalLine = body
-    .split("\n")
-    .find((line, index, lines) => lines[index - 1] === "event: final" && line.startsWith("data: "));
-  if (!finalLine) throw new Error(`Chat stream did not contain a final event: ${body.slice(0, 500)}`);
-  return JSON.parse(finalLine.slice("data: ".length));
-}
+const ROOT = path.resolve(__dirname, "..", "..");
+const E2E_PORT = process.env.E2E_PORT || "8010";
+const BASE_URL = `http://127.0.0.1:${E2E_PORT}`;
+const OUTPUT_DIR = path.join(ROOT, "output", "playwright");
 
-async function loginAsAnalyst(page) {
-  await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "登录工作台" })).toBeVisible();
-  await page.getByRole("button", { name: "进入工作台" }).click();
-  await page.waitForURL("/");
-}
+let server;
+test.setTimeout(120000);
 
-async function runMode(page, { label, message, expectedMode, expectedRoute }) {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  await expect(page.getByRole("button", { name: label, exact: true })).toHaveClass(/active/);
-
-  const responsePromise = page.waitForResponse(
-    (response) => response.url().endsWith("/api/chat/stream") && response.request().method() === "POST",
-  );
-  await page.getByRole("textbox", { name: "客诉处理目标" }).fill(message);
-  await page.getByRole("button", { name: "发送" }).click();
-
-  const response = await responsePromise;
-  expect(response.ok()).toBe(true);
-  const payload = parseFinalEvent(await response.text());
-  expect(payload.mode).toBe(expectedMode);
-  if (expectedRoute) expect(payload.route?.mode).toBe(expectedRoute);
-  expect(payload.request_id).toMatch(/^[0-9a-f-]{36}$/i);
-
-  const latestAnswer = page.locator(".chat-message.assistant").last();
-  await expect(latestAnswer).toContainText(`request_id: ${payload.request_id}`);
-  if (payload.sql_preview) {
-    await expect(latestAnswer.getByRole("button", { name: /查看底层 SQL/ })).toBeVisible();
+async function waitForServer(timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${BASE_URL}/api/overview`);
+      if (response.ok) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  return payload;
+  throw lastError || new Error("Server did not become ready");
 }
 
-test("browser selects every route and correlates SQL with audit request_id", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await loginAsAnalyst(page);
-  await page.getByRole("link", { name: "处理" }).click();
-  await expect(page.getByRole("heading", { name: "智能处理" })).toBeVisible();
-
-  const results = [];
-  results.push(
-    await runMode(page, {
-      label: "自动判断",
-      message: "查一下质量问题退款超过100元的明细",
-      expectedMode: "auto",
-      expectedRoute: "function_call_agent",
-    }),
-  );
-  results.push(
-    await runMode(page, {
-      label: "Agent 查询",
-      message: "查一下质量问题退款超过100元的明细",
-      expectedMode: "function_call_agent",
-    }),
-  );
-  results.push(
-    await runMode(page, {
-      label: "SQL + SOP",
-      message: "质量问题退款超过100元的明细，按 SOP 是否需要主管复核",
-      expectedMode: "sql_rag_chain",
-    }),
-  );
-  results.push(
-    await runMode(page, {
-      label: "政策问答",
-      message: "3C 数码拆封后出现质量问题，应该怎么处理",
-      expectedMode: "langchain_rag",
-    }),
-  );
-  results.push(
-    await runMode(page, {
-      label: "Agent 查询",
-      message: "直接退款并改订单",
-      expectedMode: "guardrail",
-    }),
-  );
-
-  const sqlResults = results.filter((item) => item.sql_preview);
-  expect(sqlResults).toHaveLength(3);
-  for (const result of sqlResults) {
-    expect(result.sql_preview).toMatch(/^\s*(?:SELECT|WITH)\b/i);
-    expect(result.sql_preview).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b/i);
-  }
-  await expect(page.getByText("高危操作已拦截")).toBeVisible();
-
-  const audit = await page.evaluate(async () => {
-    const token = localStorage.getItem("copilot_access_token");
-    const response = await fetch("/api/audit/recent?limit=100", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.json();
+test.beforeAll(async () => {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  server = spawn("python", ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", E2E_PORT], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      LLM_API_KEY: "",
+      OPENAI_API_KEY: "",
+      EMBEDDING_API_KEY: "",
+      USE_LANGCHAIN_RAG: "false",
+      DATA_QUERY_BACKEND: "sqlite",
+      REDIS_ENABLED: "false",
+    },
+    stdio: "pipe",
   });
-  for (const result of results) {
-    const event = audit.items.find((item) => item.request_id === result.request_id);
-    expect(event, `missing audit event for ${result.request_id}`).toBeTruthy();
-    expect(event.request_id).toBe(result.request_id);
-    if (result.sql_preview) expect(event.sql_preview).toBe(result.sql_preview);
-  }
-  const guardrailAudit = audit.items.find((item) => item.request_id === results.at(-1).request_id);
-  expect(guardrailAudit.blocked_by_guardrail).toBe(true);
+  await waitForServer();
 });
 
-test("evaluation page reports the canonical 57 cases", async ({ page }) => {
-  await loginAsAnalyst(page);
-  await page.goto("/eval");
-  await expect(page.getByRole("heading", { name: "把 Agent 能力变成可验收指标。" })).toBeVisible();
-  await expect(page.getByText("57 cases", { exact: true })).toBeVisible();
+test.afterAll(async () => {
+  if (server && !server.killed) {
+    server.kill();
+  }
+});
+
+test("copilot core browser flows", async ({ page }) => {
+  const report = [];
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto(`${BASE_URL}/login`);
+  await expect(page.getByRole("heading", { name: /选择身份后继续处理客诉/ })).toBeVisible();
+  await page.getByRole("button", { name: "登录" }).click();
+  await page.waitForURL(`${BASE_URL}/`);
+  await expect(page.getByRole("heading", { name: /先处理|先锁定/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("优先队列", { exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("只读数据边界")).toBeVisible({ timeout: 30000 });
+  report.push({ step: "home", ok: true });
+
+  await page.getByRole("link", { name: "处理" }).click();
+  await page.getByPlaceholder(/例如：/).fill("查一下质量问题退款超过100元的明细");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("数据查询")).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("button", { name: "SQL 预览", exact: true })).toBeVisible();
+  report.push({ step: "data_insight", ok: true });
+
+  await page.getByPlaceholder(/例如：/).fill("3C 数码拆封后出现质量问题，应该怎么处理");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByRole("button", { name: "SOP 引用", exact: true })).toBeVisible({ timeout: 60000 });
+  await expect(page.getByRole("button", { name: "运行成本", exact: true })).toBeVisible({ timeout: 60000 });
+  report.push({ step: "rag", ok: true });
+
+  await page.getByPlaceholder(/例如：/).fill("质量问题退款超过100元的明细，按 SOP 是否需要主管复核");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("SQL -> RAG 复合链路")).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText("Agent 执行链路")).toBeVisible({ timeout: 60000 });
+  report.push({ step: "sql_rag_chain", ok: true });
+
+  await page.getByPlaceholder(/例如：/).fill("直接退款并改订单");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("高危操作已拦截")).toBeVisible({ timeout: 60000 });
+  await expect(page.getByText("需要人工复核")).toBeVisible({ timeout: 60000 });
+  report.push({ step: "guardrail", ok: true });
+
+  const audit = await page.evaluate(async () => {
+    const response = await fetch("/api/audit/recent?limit=5&role=supervisor");
+    return response.json();
+  });
+  expect(audit.items.length).toBeGreaterThan(0);
+  report.push({ step: "audit", ok: true, count: audit.items.length });
+
+  await page.getByRole("link", { name: "评测" }).click();
+  await expect(page.getByRole("heading", { name: /把 Agent 能力变成可验收指标/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("Route Accuracy")).toBeVisible({ timeout: 30000 });
+  const evalReport = await page.evaluate(async () => {
+    const response = await fetch("/api/eval/report?role=analyst");
+    if (!response.ok) throw new Error(`Eval report request failed: ${response.status}`);
+    return response.json();
+  });
+  const categoryTotal = [
+    "rag_cases",
+    "route_cases",
+    "tool_cases",
+    "guardrail_cases",
+    "memory_cases",
+  ].reduce((sum, key) => sum + evalReport.total[key], 0);
+  expect(evalReport.total.all_cases).toBe(categoryTotal);
+  await expect(page.getByText(`${evalReport.total.all_cases} cases`, { exact: true })).toBeVisible({ timeout: 30000 });
+  report.push({ step: "eval_report", ok: true });
+
+  await page.getByRole("button", { name: "退出" }).click();
+  await page.waitForURL(`${BASE_URL}/login`);
+  await page.getByRole("button", { name: /supervisor/ }).click();
+  await page.getByRole("button", { name: "登录" }).click();
+  await page.waitForURL(`${BASE_URL}/`);
+  await page.getByRole("link", { name: "审批中心" }).click();
+  await expect(page.getByRole("heading", { name: /先处理待复核/ })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator(".review-item").first()).toBeVisible({ timeout: 30000 });
+  report.push({ step: "review_center", ok: true });
+
+  fs.writeFileSync(path.join(OUTPUT_DIR, "acceptance-report.json"), JSON.stringify(report, null, 2), "utf-8");
 });

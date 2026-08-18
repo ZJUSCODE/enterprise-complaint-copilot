@@ -1,5 +1,5 @@
 <template>
-  <aside ref="railRef" class="evidence-rail">
+  <aside class="evidence-rail">
     <div class="rail-head">
       <p class="eyebrow">证据</p>
       <h2>{{ message ? '本轮依据' : '等待提问' }}</h2>
@@ -20,8 +20,16 @@
 
       <el-collapse v-if="hasEvidence" v-model="openPanels" class="evidence-collapse">
         <el-collapse-item v-if="message.sql_preview" title="SQL 预览" name="sql">
-          <div ref="sqlContentRef">
-            <SqlPreview :sql="message.sql_preview" />
+          <SqlPreview :sql="message.sql_preview" />
+          <div class="sql-actions">
+            <button
+              v-if="message?.table?.length"
+              type="button"
+              class="text-link"
+              @click="exportTableCsv(message.table, message.request_id)"
+            >
+              导出数据
+            </button>
           </div>
         </el-collapse-item>
         <el-collapse-item v-if="message.citations?.length" title="SOP 引用" name="citations">
@@ -30,11 +38,13 @@
         <el-collapse-item v-if="message.tool_trace?.length" title="执行轨迹" name="trace">
           <ToolTrace :items="message.tool_trace" />
         </el-collapse-item>
-        <el-collapse-item v-if="message.token_usage || message.estimated_cost_usd !== undefined" title="运行信息" name="runtime">
+        <el-collapse-item v-if="message.token_usage || message.estimated_cost_usd !== undefined" title="运行成本" name="runtime">
           <div class="runtime-detail">
-            <span v-if="message.token_usage">{{ message.token_usage.total_tokens }} tokens</span>
-            <span v-if="message.estimated_cost_usd !== undefined">成本 ${{ Number(message.estimated_cost_usd).toFixed(6) }}</span>
-            <span v-if="message.retry_count !== undefined">重试 {{ message.retry_count }} 次</span>
+            <span v-if="message.token_usage">tokens {{ message.token_usage.total_tokens }}</span>
+            <span v-if="message.token_usage?.embedding_tokens !== undefined">embedding {{ message.token_usage.embedding_tokens }}</span>
+            <span v-if="message.token_usage">prompt {{ message.token_usage.prompt_tokens }}</span>
+            <span v-if="message.token_usage">completion {{ message.token_usage.completion_tokens }}</span>
+            <strong>cost ${{ Number(message.estimated_cost_usd || 0).toFixed(6) }}</strong>
           </div>
         </el-collapse-item>
       </el-collapse>
@@ -51,13 +61,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import AgentFlow from '@/components/AgentFlow.vue';
 import RagCitations from '@/components/RagCitations.vue';
 import SqlPreview from '@/components/SqlPreview.vue';
 import ToolTrace from '@/components/ToolTrace.vue';
-import type { ChatResponse } from '@/types/api';
+import type { ChatResponse, TicketRow } from '@/types/api';
 import { reviewStatusLabel } from '@/utils/format';
 
 const props = defineProps<{
@@ -65,8 +75,6 @@ const props = defineProps<{
 }>();
 
 const openPanels = ref<string[]>([]);
-const railRef = ref<HTMLElement | null>(null);
-const sqlContentRef = ref<HTMLElement | null>(null);
 
 const hasEvidence = computed(() => {
   const message = props.message;
@@ -90,13 +98,42 @@ watch(
   { immediate: true },
 );
 
+function exportTableCsv(table: TicketRow[], requestId?: string) {
+  if (!table.length) return;
+  const headers = Object.keys(table[0]);
+  const csvRows = [headers.join(',')];
+  for (const row of table) {
+    csvRows.push(headers.map((h) => String(row[h as keyof TicketRow] ?? '')).join(','));
+  }
+  const blob = new Blob(['﻿' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `copilot_export_${(requestId || 'data').slice(0, 8)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 defineExpose({
-  async openSqlPanel() {
+  openSqlPanel() {
     if (!openPanels.value.includes('sql')) {
       openPanels.value = [...openPanels.value, 'sql'];
     }
-    await nextTick();
-    sqlContentRef.value?.scrollIntoView({ block: 'start' });
   },
 });
 </script>
+
+<style scoped>
+.sql-actions {
+  margin-top: 8px;
+}
+.sql-actions .text-link {
+  background: none;
+  border: none;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  text-decoration: underline;
+}
+</style>
