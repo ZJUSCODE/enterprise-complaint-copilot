@@ -60,7 +60,7 @@ class LoginResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
-    mode: Literal["function_call_agent", "sql_rag_chain", "langchain_rag", "router_demo", "auto"] = "function_call_agent"
+    mode: Literal["function_call_agent", "sql_rag_chain", "langchain_rag", "router_demo", "auto", "modular_rag"] = "function_call_agent"
     session_id: str | None = None
     role: Literal["viewer", "analyst", "supervisor"] | None = "analyst"
     response_language: Literal["auto", "zh", "en"] = "auto"

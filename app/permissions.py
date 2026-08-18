@@ -13,6 +13,7 @@ class PermissionPolicy:
         "router_demo": "data:query",
         "auto": "data:query",
         "langchain_rag": "rag:read",
+        "modular_rag": "rag:read",
     }
 
     @classmethod

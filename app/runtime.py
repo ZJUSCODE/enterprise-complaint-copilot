@@ -193,7 +193,7 @@ def daily_risk_report(date: str | None = None, current_user: dict[str, Any] | No
 
 @app.get("/api/sample-questions")
 def sample_questions(current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
-    return {"items": [{"mode": "function_call_agent", "text": "查一下质量问题退款超过100元的明细"}, {"mode": "sql_rag_chain", "text": "质量问题退款超过100元的明细，按 SOP 是否需要主管复核"}, {"mode": "function_call_agent", "text": "生鲜延误坏了，运费和货款怎么赔"}, {"mode": "router_demo", "text": "生鲜物流延误的异常明细，按规定应该怎么赔"}, {"mode": "function_call_agent", "text": "用户 8b5f2503d0b789179e68b9254729e682 的风险分是多少"}, {"mode": "langchain_rag", "text": "3C 数码拆封后出现质量问题，应该怎么处理"}]}
+    return {"items": [{"mode": "function_call_agent", "text": "查一下质量问题退款超过100元的明细"}, {"mode": "sql_rag_chain", "text": "质量问题退款超过100元的明细，按 SOP 是否需要主管复核"}, {"mode": "function_call_agent", "text": "生鲜延误坏了，运费和货款怎么赔"}, {"mode": "router_demo", "text": "生鲜物流延误的异常明细，按规定应该怎么赔"}, {"mode": "function_call_agent", "text": "用户 8b5f2503d0b789179e68b9254729e682 的风险分是多少"}, {"mode": "langchain_rag", "text": "3C 数码拆封后出现质量问题，应该怎么处理"}, {"mode": "modular_rag", "text": "3C 数码拆封后出现质量问题，经过多路重排与自检后应该怎么处理"}]}
 
 
 @app.get("/api/i18n/terms")

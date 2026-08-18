@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -14,6 +15,13 @@ from app.permissions import PermissionPolicy
 from app.rag import LangChainRAGService, PolicyKnowledgeBase
 from app.routing import AutoRouter
 from app.stores import RedisRuntime, SessionMemoryStore
+from app.pipeline import ModularRAGPipeline
+from app.modules.adaptive_router import AdaptiveRouterModule
+from app.modules.retriever_module import HybridRetrieverModule
+from app.modules.reranker import CrossEncoderReranker
+from app.modules.crag import CRAGCorrector
+from app.modules.self_rag import SelfRAGCritic
+from app.modules.base import Citation
 from app.ticket_store import QueryFilters, ReadOnlySQLiteStore
 from app.utils import (
     add_token_usage,
@@ -37,6 +45,7 @@ class Orchestrator:
         self.function_agent = FunctionCallingAgent(settings, analytics, sql_store, knowledge_base, self.memory)
         self.langchain_rag = LangChainRAGService(settings, knowledge_base)
         self.router = AutoRouter(settings)
+        self._modular_pipeline: ModularRAGPipeline | None = None
 
     def respond(self, message: str, mode: str, session_id: str | None = None, role: str = "analyst", response_language: str = "auto", trace_id: str | None = None) -> dict[str, Any]:
         request_id = str(uuid.uuid4())
@@ -261,6 +270,8 @@ class Orchestrator:
         blocked = self.function_agent._guardrail(message)
         if blocked:
             return blocked
+        if mode == "modular_rag":
+            return self._respond_modular_rag(message, session_id=session_id)
         if mode == "langchain_rag":
             result, rag_duration_ms = timed_call(self.langchain_rag.query, message, category=detect_category_from_query(message), top_k=3)
             return {
@@ -303,3 +314,117 @@ class Orchestrator:
             delegated["route"] = {key: value for key, value in decision.items() if not key.startswith("_") and key != "model_trace"}
             return delegated
         return self.function_agent.respond(message, session_id=session_id)
+
+    # ── Modular RAG mode ────────────────────────────────────────────────
+    def _get_modular_pipeline(self) -> ModularRAGPipeline:
+        """Lazily build (and cache) the pluggable Modular RAG pipeline.
+
+        Modules: AdaptiveRouter → HybridRetriever (wraps LangChainRAGService)
+        → Cross-Encoder Reranker → CRAG corrector → Self-RAG critic.
+        The OpenAI client is only built when an API key is configured;
+        modules degrade gracefully (rule-based reflection, lexical rerank) otherwise.
+        """
+        if self._modular_pipeline is None:
+            llm_client = None
+            if self.settings.llm_api_key:
+                try:
+                    from openai import OpenAI
+                    llm_client = OpenAI(api_key=self.settings.llm_api_key, base_url=self.settings.llm_base_url)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("OpenAI client init failed for modular RAG: %s", exc)
+                    llm_client = None
+            self._modular_pipeline = ModularRAGPipeline(modules=[
+                AdaptiveRouterModule(),
+                HybridRetrieverModule(self.langchain_rag),
+                CrossEncoderReranker(),
+                CRAGCorrector(self._retrieve_citations),
+                SelfRAGCritic(llm_client, model=self.settings.llm_model),
+            ])
+        return self._modular_pipeline
+
+    def _retrieve_citations(self, query: str, top_k: int = 5) -> list[Citation]:
+        """Callable used by CRAGCorrector to re-retrieve with a reformulated query."""
+        result = self.langchain_rag.query(question=query, category=None, top_k=top_k)
+        return [
+            Citation(
+                id=s.get("id", ""),
+                title=s.get("title", ""),
+                category=s.get("category", ""),
+                citation=s.get("citation", ""),
+                excerpt=s.get("excerpt", ""),
+                retrieval_score=s.get("retrieval_score", 0.0),
+                rerank_score=s.get("rerank_score", 0.0),
+                source=s.get("source", ""),
+            )
+            for s in result.get("sources", [])
+        ]
+
+    def _run_modular_pipeline(self, query: str, metadata: dict[str, Any] | None = None):
+        pipeline = self._get_modular_pipeline()
+        try:
+            return asyncio.run(pipeline.run(query, metadata))
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(pipeline.run(query, metadata))
+            finally:
+                loop.close()
+
+    def _respond_modular_rag(self, message: str, session_id: str | None = None) -> dict[str, Any]:
+        sid = self.memory.get_or_create(session_id)
+        category = detect_category_from_query(message)
+        ctx = self._run_modular_pipeline(message, {"category": category, "top_k": 5})
+        self.memory.append(sid, "user", message)
+        self.memory.append(sid, "assistant", ctx.answer or "")
+        return self._format_modular_rag_response(ctx, message, sid, category)
+
+    @staticmethod
+    def _format_modular_rag_response(ctx, message, session_id, category) -> dict[str, Any]:
+        results = ctx.corrected_results or ctx.reranked_results or ctx.vector_results
+        citations = [
+            {
+                "label": c.citation,
+                "text": c.excerpt,
+                "retrieval_score": c.retrieval_score,
+                "rerank_score": c.rerank_score,
+                "source": c.source,
+            }
+            for c in results
+        ]
+        activated = ctx.metadata.get("activated_modules", [])
+        timings = ctx.metadata.get("module_timings", {})
+        reranker = ctx.metadata.get("reranker", {})
+        crag = ctx.metadata.get("crag", {})
+        self_rag = ctx.metadata.get("self_rag", {})
+        adaptive = ctx.metadata.get("adaptive_router", {})
+        highlights = [
+            f"检索策略：{adaptive.get('strategy', 'hybrid')}（{adaptive.get('reason', '')}）",
+            f"激活模块：{', '.join(activated) or '无'}",
+            f"Cross-Encoder 重排：{reranker.get('model', '未启用')}（重排 {reranker.get('count', 0)} 条）",
+            f"CRAG 检索质量校验：{crag.get('status', 'n/a')}",
+            f"Self-RAG 反思：{'通过' if self_rag.get('passed') else '未通过（规则检查）'}",
+        ]
+        tool_trace = [{
+            "tool": "modular_rag_pipeline",
+            "arguments": {"query": message, "category": category, "top_k": 5},
+            "duration_ms": round(sum(timings.values()), 2) if timings else 0,
+            "result_summary": summarize_text(ctx.answer or "", limit=180),
+            "token_usage": ctx.metadata.get("rag_token_usage", {}),
+            "cost_breakdown": ctx.metadata.get("rag_cost_breakdown", {}),
+            "timing": ctx.metadata.get("rag_timing", {}),
+            "activated_modules": activated,
+            "module_timings": timings,
+        }]
+        return {
+            "mode": "modular_rag",
+            "title": "Modular RAG · AdaptiveRouter + HybridRetriever + Cross-Encoder + CRAG + Self-RAG",
+            "summary": ctx.answer or "未检索到相关文档，建议转人工复核。",
+            "session_id": session_id,
+            "highlights": highlights,
+            "citations": citations,
+            "tool_trace": tool_trace,
+            "degradation_path": ctx.metadata.get("retrieval_mode"),
+            "model_trace": [],
+            "_token_usage": ctx.metadata.get("rag_token_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
+            "_cost_breakdown": ctx.metadata.get("rag_cost_breakdown"),
+        }
