@@ -291,11 +291,23 @@ class LangChainRAGService:
         }
 
     def _bm25_sources(self, question: str, category: str | None, top_k: int) -> list[dict[str, Any]]:
-        """用 BM25 稀疏检索产出 sources（向量不可用时的词法兜底）。"""
-        hits = self.bm25_index.search(question, category=category, top_k=top_k)
-        sources: list[dict[str, Any]] = []
+        """用 BM25 稀疏检索产出 sources（向量不可用时的词法兜底）。
+
+        政策条目（id 以 POL- 开头）是判责锚点，BM25 在多取后对政策加权，
+        避免政策被更长的 FAQ/SOP chunk 挤出 top_k；FAQ/SOP 仍可命中补充口径。
+        """
+        # 多取候选再做政策加权重排，保证加权后数量充足
+        hits = self.bm25_index.search(question, category=category, top_k=max(top_k * 3, 9))
+        weighted: list[tuple[str, float, float]] = []
         for idx, score in hits:
             doc_id = self.bm25_index._ids[idx]
+            weight = 1.5 if str(doc_id).startswith("POL-") else 1.0
+            weighted.append((doc_id, score * weight, score))
+        weighted.sort(key=lambda item: item[1], reverse=True)
+        weighted = weighted[:top_k]
+
+        sources: list[dict[str, Any]] = []
+        for doc_id, weighted_score, raw_score in weighted:
             meta = self._corpus_metas.get(doc_id, {})
             text = self._corpus_texts.get(doc_id, "")
             excerpt = text if len(text) <= 220 else summarize_text(text, limit=220)
@@ -305,9 +317,10 @@ class LangChainRAGService:
                 "category": meta.get("category", ""),
                 "citation": meta.get("citation", doc_id),
                 "excerpt": excerpt,
-                "retrieval_score": round(max(0.0, min(1.0, score / 10.0)), 4),
+                "retrieval_score": round(max(0.0, min(1.0, raw_score / 10.0)), 4),
                 "rerank_score": round(lexical_overlap_score(question, f"{meta.get('title', '')} {text}"), 4),
                 "source": "bm25",
+                "is_policy": bool(str(doc_id).startswith("POL-")),
             })
         return sources
 

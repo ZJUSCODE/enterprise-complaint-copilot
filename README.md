@@ -17,6 +17,20 @@
 - **MCP 风格工具注册**：同一套工具注册表支持 UI、API、`/api/mcp` 和 stdio MCP server。
 - **面试友好结构**：后端已拆分为 Agent、Router、Tool Registry、RAG、LangGraph、Runtime State、HTTP Auth 等模块。
 
+## RAG 与检索（v2）
+
+知识库从 1.3 万字符扩到 **8.7 万+**（40 条政策 + 38 篇 SOP/FAQ/案例/处理矩阵），检索链路升级为**可插拔架构**：
+
+| 能力 | 说明 |
+| --- | --- |
+| 企业级知识库 | 政策（判责锚点）+ SOP（流程）+ FAQ（口径）+ 案例（复盘）+ 品类×问题处理矩阵（177 条）+ 政策参数总表（99 条） |
+| BM25 混合检索 | `rank_bm25`（中文 bigram 分词）+ 政策加权，与向量双路召回 RRF 融合（`app/bm25.py`） |
+| 词法兜底升级 | 向量/BM25 不可用时的兜底从 token 重叠率升级为真 BM25，绝不崩 |
+| WeKnora 可切换 | `RETRIEVAL_BACKEND=weknora` 一键切换腾讯开源 WeKnora 做外部检索底座，Agent/Guardrail/评测不动（见 `docs/weknora_integration.md`） |
+| 评测驱动 | 53 条 RAG 问答集 + 39 条 Agent 能力集，真实运行并出报告（见 `eval/README.md`、`eval/results/`） |
+
+评测结果（2026-08-18，BM25 真实链路）：政策命中 88.9%、负例拒答 100%、护栏拦截 100%、多轮复用 100%。详情见 `eval/results/2026-08-18_eval_report.md`。
+
 ## 本地演示入口
 
 推荐单端口生产演示入口：

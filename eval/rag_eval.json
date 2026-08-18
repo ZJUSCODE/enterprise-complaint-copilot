@@ -14,12 +14,15 @@
   {
     "question": "一线客服能不能对高风险用户口头承诺超额赔付？需要保留什么依据？",
     "expected_doc_id": "POL-005",
-    "acceptable_doc_ids": ["POL-001", "POL-005"],
+    "acceptable_doc_ids": [
+      "POL-001",
+      "POL-005"
+    ],
     "expected_topic": "高风险扩赔与通用输出边界",
     "tag": "similar_sop"
   },
   {
-    "question": "物流延误超过 7 天并且包装破损，客服应该怎么安抚？",
+    "question": "物延误超过 7 天并且包装破损，客服应该怎么安抚？",
     "expected_doc_id": "POL-002",
     "expected_topic": "物流延误与破损安抚策略",
     "tag": "logistics"
@@ -33,7 +36,10 @@
   {
     "question": "高价值商品物流延误，客服能不能扩大赔付金额？",
     "expected_doc_id": "POL-002",
-    "acceptable_doc_ids": ["POL-002", "POL-005"],
+    "acceptable_doc_ids": [
+      "POL-002",
+      "POL-005"
+    ],
     "expected_topic": "物流延误与高风险扩赔边界",
     "tag": "similar_sop"
   },
@@ -52,7 +58,10 @@
   {
     "question": "耳机拆封后用户主观不满意，能不能直接套用无理由退货？",
     "expected_doc_id": "POL-003",
-    "acceptable_doc_ids": ["POL-003", "POL-001"],
+    "acceptable_doc_ids": [
+      "POL-003",
+      "POL-001"
+    ],
     "expected_topic": "3C 拆封与通用退货混淆",
     "tag": "similar_sop"
   },
@@ -71,7 +80,10 @@
   {
     "question": "生鲜重复索赔账户又说冷链超时，应该直接赔付吗？",
     "expected_doc_id": "POL-004",
-    "acceptable_doc_ids": ["POL-004", "POL-005"],
+    "acceptable_doc_ids": [
+      "POL-004",
+      "POL-005"
+    ],
     "expected_topic": "生鲜坏损与高风险复核",
     "tag": "similar_sop"
   },
@@ -94,19 +106,245 @@
     "tag": "risk"
   },
   {
-    "question": "公司年会报销流程怎么走？",
+    "question": "定制刻字的商品签收后想退，能按 7 天无理由处理吗？",
+    "expected_doc_id": "POL-010",
+    "expected_topic": "7天无理由退货适用边界",
+    "tag": "policy_010"
+  },
+  {
+    "question": "鲜活易腐的生鲜类商品支持无理由退货吗？",
+    "expected_doc_id": "POL-010",
+    "acceptable_doc_ids": [
+      "POL-010",
+      "POL-004"
+    ],
+    "expected_topic": "无理由边界与生鲜",
+    "tag": "policy_010"
+  },
+  {
+    "question": "用户上传了开箱视频证明商品质量问题，单笔 300 元可以先行赔付吗？",
+    "expected_doc_id": "POL-011",
+    "expected_topic": "质量问题举证与先行赔付",
+    "tag": "policy_011"
+  },
+  {
+    "question": "手机 10 天内出现性能故障，按三包应该怎么处理？",
+    "expected_doc_id": "POL-012",
+    "expected_topic": "三包法与厂家保修联动",
+    "tag": "policy_012"
+  },
+  {
+    "question": "一箱水果 70% 烂了，按生鲜赔付分级应该怎么处理？",
+    "expected_doc_id": "POL-013",
+    "acceptable_doc_ids": [
+      "POL-013",
+      "POL-004"
+    ],
+    "expected_topic": "生鲜赔付分级",
+    "tag": "policy_013"
+  },
+  {
+    "question": "冷链包裹签收时已经化冻，责任怎么判定？",
+    "expected_doc_id": "POL-014",
+    "expected_topic": "冷链断链责任判定",
+    "tag": "policy_014"
+  },
+  {
+    "question": "衣服吊牌剪了还能无理由退货吗？",
+    "expected_doc_id": "POL-015",
+    "expected_topic": "服饰鞋包类退换规则",
+    "tag": "policy_015"
+  },
+  {
+    "question": "大件家具签收后发现断裂，应该怎么处理？",
+    "expected_doc_id": "POL-016",
+    "expected_topic": "大件家居安装破损处理",
+    "tag": "policy_016"
+  },
+  {
+    "question": "美妆产品开封后过敏，什么条件下可以退？",
+    "expected_doc_id": "POL-017",
+    "expected_topic": "美妆个护开封与过敏处理",
+    "tag": "policy_017"
+  },
+  {
+    "question": "食品里发现异物，应该按什么流程处理？",
+    "expected_doc_id": "POL-018",
+    "expected_topic": "食品过期与异物投诉",
+    "tag": "policy_018"
+  },
+  {
+    "question": "退款提交后一般多久到账？",
+    "expected_doc_id": "POL-019",
+    "expected_topic": "退款时效与原路退回",
+    "tag": "policy_019"
+  },
+  {
+    "question": "无理由退货的运费应该谁承担？",
+    "expected_doc_id": "POL-020",
+    "expected_topic": "运费争议处理规则",
+    "tag": "policy_020"
+  },
+  {
+    "question": "快递确认丢件了，客服应该怎么处理？",
+    "expected_doc_id": "POL-021",
+    "expected_topic": "丢件与少件处理",
+    "tag": "policy_021"
+  },
+  {
+    "question": "买完 3 天降价了能申请补差价吗？",
+    "expected_doc_id": "POL-022",
+    "expected_topic": "价格保护机制",
+    "tag": "policy_022"
+  },
+  {
+    "question": "用户要求删除全部个人信息，应该走什么流程？",
+    "expected_doc_id": "POL-024",
+    "expected_topic": "隐私与个人信息保护",
+    "tag": "policy_024"
+  },
+  {
+    "question": "用户说要投诉到 12315，一线客服应该怎么办？",
+    "expected_doc_id": "POL-025",
+    "expected_topic": "投诉升级与监管介入",
+    "tag": "policy_025"
+  },
+  {
+    "question": "付费会员退货免运费权益和品类政策冲突时怎么处理？",
+    "expected_doc_id": "POL-026",
+    "expected_topic": "会员权益与售后叠加",
+    "tag": "policy_026"
+  },
+  {
+    "question": "跨境保税仓商品非质量问题支持无理由退货吗？",
+    "expected_doc_id": "POL-027",
+    "expected_topic": "跨境与保税仓商品售后",
+    "tag": "policy_027"
+  },
+  {
+    "question": "收到的商品与页面材质描述不符，怎么处理？",
+    "expected_doc_id": "POL-028",
+    "expected_topic": "虚假宣传与货不对板",
+    "tag": "policy_028"
+  },
+  {
+    "question": "工单结案后多久需要回访？",
+    "expected_doc_id": "POL-030",
+    "expected_topic": "多轮沟通与工单闭环",
+    "tag": "policy_030"
+  },
+  {
+    "question": "用户反馈账号被盗刷下单，第一优先动作是什么？",
+    "expected_doc_id": "POL-031",
+    "expected_topic": "账号安全与盗刷处理",
+    "tag": "policy_031"
+  },
+  {
+    "question": "客服可以对用户说『你爱投诉就投诉』吗？",
+    "expected_doc_id": "POL-032",
+    "expected_topic": "客服沟通红线",
+    "tag": "policy_032"
+  },
+  {
+    "question": "虚拟商品激活码发错了怎么处理？",
+    "expected_doc_id": "POL-040",
+    "expected_topic": "虚拟商品与数字内容售后",
+    "tag": "policy_040"
+  },
+  {
+    "question": "儿童玩具缺少 3C 认证标识应该怎么处理？",
+    "expected_doc_id": "POL-042",
+    "expected_topic": "母婴用品安全与退换",
+    "tag": "policy_042"
+  },
+  {
+    "question": "活体宠物签收 48 小时内死亡，需要什么凭证？",
+    "expected_doc_id": "POL-043",
+    "expected_topic": "宠物用品与活体售后",
+    "tag": "policy_043"
+  },
+  {
+    "question": "单笔现金赔偿超过 1000 元需要谁审批？",
+    "expected_doc_id": "POL-047",
+    "expected_topic": "赔偿上限与特殊审批",
+    "tag": "policy_047"
+  },
+  {
+    "question": "二手手机成色描述与实物不符怎么处理？",
+    "expected_doc_id": "POL-048",
+    "expected_topic": "二手与翻新商品售后",
+    "tag": "policy_048"
+  },
+  {
+    "question": "家电延保服务覆盖哪些范围？",
+    "expected_doc_id": "POL-049",
+    "expected_topic": "家电延保服务",
+    "tag": "policy_049"
+  },
+  {
+    "question": "大促期间物流延误几天才开始判定异常？",
+    "expected_doc_id": "POL-002",
+    "acceptable_doc_ids": [
+      "POL-002",
+      "POL-001"
+    ],
+    "expected_topic": "大促物流时效",
+    "tag": "promotion"
+  },
+  {
+    "question": "大促超卖导致订单被取消，补偿标准是什么？",
+    "expected_doc_id": "POL-001",
+    "acceptable_doc_ids": [
+      "POL-001",
+      "POL-047"
+    ],
+    "expected_topic": "超卖补偿",
+    "tag": "promotion"
+  },
+  {
+    "question": "公司年会的节目单怎么安排？",
     "expected_doc_id": null,
     "expected_topic": "无售后 SOP 命中",
     "tag": "no_answer"
   },
   {
-    "question": "仓库员工排班系统如何修改班次？",
+    "question": "员工绩效考核的评分标准是什么？",
     "expected_doc_id": null,
     "expected_topic": "无售后 SOP 命中",
     "tag": "no_answer"
   },
   {
-    "question": "办公室 WiFi 密码忘记了怎么重置？",
+    "question": "怎么申请公司宿舍的入住资格？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "本周五的团建活动几点集合？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "项目经理如何申请项目奖金？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "办公室绿植养护的标准流程是什么？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "公司班车的时刻表在哪里查？",
+    "expected_doc_id": null,
+    "expected_topic": "无售后 SOP 命中",
+    "tag": "no_answer"
+  },
+  {
+    "question": "如何提交工伤理赔申请材料？",
     "expected_doc_id": null,
     "expected_topic": "无售后 SOP 命中",
     "tag": "no_answer"
