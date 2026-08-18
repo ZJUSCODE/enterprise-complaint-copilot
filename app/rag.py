@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import time
@@ -8,42 +7,72 @@ from pathlib import Path
 from typing import Any
 
 import chromadb
+import os
+
+os.environ.setdefault("LANGCHAIN_OPENAI_TCP_KEEPALIVE", "0")
+
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from openai import OpenAI
 
 from app.config import Settings, KB_DIR, VECTOR_DIR
+from app.rag_metrics import compute_online_metrics
 from app.utils import (
     estimate_cost_breakdown,
     estimate_text_tokens,
-    extract_usage,
     extract_langchain_usage,
     lexical_overlap_score,
     summarize_text,
 )
 
 
-VECTOR_MANIFEST = "kb_manifest.json"
+def reciprocal_rank_fusion(
+    result_lists: list[list[dict[str, Any]]],
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    scores: dict[str, float] = {}
+    items: dict[str, dict[str, Any]] = {}
+    for result_list in result_lists:
+        for rank, item in enumerate(result_list, start=1):
+            doc_id = item.get("id") or item.get("doc_id", str(rank))
+            rrf_score = 1.0 / (k + rank)
+            scores[doc_id] = scores.get(doc_id, 0.0) + rrf_score
+            if doc_id not in items:
+                items[doc_id] = dict(item)
+            items[doc_id]["rrf_score"] = round(scores[doc_id], 6)
+    return sorted(items.values(), key=lambda x: x.get("rrf_score", 0), reverse=True)
 
 
-def knowledge_base_hash(kb_dir: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted([kb_dir / "policies.json", *kb_dir.glob("*.md")]):
-        if not path.exists() or path.name.lower().startswith("readme"):
-            continue
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+def _semantic_split_section(text: str, max_chars: int = 500) -> list[str]:
+    """Split a section by sentence boundaries when it exceeds max_chars."""
+    if len(text) <= max_chars:
+        return [text]
+    sentences = re.split(r"(?<=[。！？\n])", text)
+    chunks: list[str] = []
+    current = ""
+    for sent in sentences:
+        if len(current) + len(sent) > max_chars and current:
+            chunks.append(current.strip())
+            current = sent
+        else:
+            current += sent
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks or [text]
 
 
-def _load_and_chunk_markdown_docs(kb_dir: Path) -> tuple[list[str], list[dict], list[str]]:
-    """Load *.md files from kb_dir, split into chunks for vector indexing."""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=50,
-        separators=["\n## ", "\n\n", "\n", "。", "；", " "],
-        keep_separator=True,
-    )
+def _load_and_chunk_markdown_docs(
+    kb_dir: Path,
+    cleaner: "DataCleaner | None" = None,
+) -> tuple[list[str], list[dict], list[str]]:
+    """Load *.md files from kb_dir, split by heading boundaries (semantic chunking).
+    If a DataCleaner is provided, apply noise removal and deduplication.
+    """
+    from app.document.cleaner import DataCleaner
+    from app.document.parsers.base import DocumentSection
+
+    if cleaner is None:
+        cleaner = DataCleaner()
+
     all_texts: list[str] = []
     all_metadatas: list[dict] = []
     all_ids: list[str] = []
@@ -53,31 +82,131 @@ def _load_and_chunk_markdown_docs(kb_dir: Path) -> tuple[list[str], list[dict], 
         if md_file.name.lower().startswith("readme"):
             continue
         content = md_file.read_text(encoding="utf-8")
-        chunks = splitter.split_text(content)
-        if not chunks:
+        if not content.strip():
             continue
         name_lower = md_file.name.lower()
         first_heading = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
         doc_title = first_heading.group(1).strip() if first_heading else md_file.stem
         category = "售后" if "after_sales" in name_lower else "物流" if "logistics" in name_lower else "生鲜" if "fresh" in name_lower else "通用"
 
-        for chunk in chunks:
-            chunk_counter += 1
-            headings = re.findall(r"^##\s+(.+)$", chunk, re.MULTILINE)
-            section_title = headings[-1].strip() if headings else ""
-            chunk_id = f"{md_file.stem}_chunk_{chunk_counter:03d}"
+        # Primary split: by ## headings
+        raw_sections = re.split(r"(?=^## )", content, flags=re.MULTILINE)
+        # Wrap in DocumentSection for cleaning
+        doc_sections = []
+        for section in raw_sections:
+            section = section.strip()
+            if not section:
+                continue
+            heading_match = re.match(r"^##\s+(.+)$", section, re.MULTILINE)
+            section_title = heading_match.group(1).strip() if heading_match else ""
+            doc_sections.append(DocumentSection(
+                title=section_title,
+                content=section,
+                section_type="heading" if section_title else "paragraph",
+                metadata={"source_file": md_file.name, "doc_title": doc_title, "category": category},
+            ))
+
+        # Apply cleaning pipeline
+        cleaned_sections = cleaner.clean(doc_sections)
+
+        for section in cleaned_sections:
+            section_title = section.title
             title = section_title or doc_title
             citation = f"{md_file.name} > {section_title}" if section_title else md_file.name
-            all_texts.append(chunk)
+            parent_id = f"{md_file.stem}_section_{chunk_counter:03d}"
+
+            # Store parent section for small-to-big retrieval
+            all_texts.append(section.content)
             all_metadatas.append({
-                "doc_id": chunk_id,
+                "doc_id": parent_id,
                 "title": title,
                 "category": category,
                 "citation": citation,
                 "source_file": md_file.name,
                 "section_title": section_title,
+                "is_parent": True,
+                "quality_score": section.metadata.get("quality_score", 0.0),
             })
-            all_ids.append(chunk_id)
+            all_ids.append(parent_id)
+
+            # Child chunks: sentence-level split for sections > 500 chars
+            sub_chunks = _semantic_split_section(section.content, max_chars=500)
+            for idx, sub in enumerate(sub_chunks):
+                chunk_counter += 1
+                child_id = f"{md_file.stem}_chunk_{chunk_counter:03d}"
+                all_texts.append(sub)
+                all_metadatas.append({
+                    "doc_id": child_id,
+                    "title": title,
+                    "category": category,
+                    "citation": citation,
+                    "source_file": md_file.name,
+                    "section_title": section_title,
+                    "parent_id": parent_id,
+                    "chunk_index": idx,
+                    "is_parent": False,
+                    "quality_score": section.metadata.get("quality_score", 0.0),
+                })
+                all_ids.append(child_id)
+
+    return all_texts, all_metadatas, all_ids
+
+
+def _load_and_process_documents(
+    kb_dir: Path,
+) -> tuple[list[str], list[dict], list[str]]:
+    """Load all supported files (PDF/Word/Excel/MD) from kb_dir using the full
+    document processing pipeline: parse → clean → chunk.
+    Returns (texts, metadatas, ids) compatible with ChromaDB.
+    """
+    from app.document.parser import DocumentParser
+    from app.document.cleaner import DataCleaner
+    from app.document.chunking import ChunkingEngine
+
+    parser = DocumentParser()
+    cleaner = DataCleaner()
+    chunker = ChunkingEngine(strategy="heading", max_chars=500)
+
+    all_texts: list[str] = []
+    all_metadatas: list[dict] = []
+    all_ids: list[str] = []
+
+    # 1. Markdown files via existing flow (with cleaning)
+    md_texts, md_metas, md_ids = _load_and_chunk_markdown_docs(kb_dir, cleaner=cleaner)
+    all_texts.extend(md_texts)
+    all_metadatas.extend(md_metas)
+    all_ids.extend(md_ids)
+
+    # 2. Non-markdown files via DocumentParser
+    for file_path in sorted(kb_dir.iterdir()):
+        if not file_path.is_file():
+            continue
+        ext = file_path.suffix.lower()
+        if ext == ".md" or ext not in parser.supported_extensions():
+            continue
+        if file_path.name.lower().startswith("readme"):
+            continue
+
+        try:
+            sections = parser.parse(str(file_path))
+            cleaned = cleaner.clean(sections)
+            chunks = chunker.chunk(cleaned, source_file=file_path.name, source_type=ext)
+            name_lower = file_path.name.lower()
+            category = "售后" if "after_sales" in name_lower else "物流" if "logistics" in name_lower else "生鲜" if "fresh" in name_lower else "通用"
+            for c in chunks:
+                all_texts.append(c.text)
+                all_metadatas.append({
+                    "doc_id": c.metadata.chunk_id,
+                    "title": c.metadata.section_title or file_path.stem,
+                    "category": category,
+                    "citation": f"{file_path.name} > {c.metadata.section_title}" if c.metadata.section_title else file_path.name,
+                    "source_file": file_path.name,
+                    "section_title": c.metadata.section_title,
+                    "quality_score": c.metadata.quality_score,
+                })
+                all_ids.append(c.metadata.chunk_id)
+        except Exception as exc:
+            logger.warning("Failed to process %s: %s", file_path.name, exc)
 
     return all_texts, all_metadatas, all_ids
 
@@ -90,8 +219,6 @@ class PolicyKnowledgeBase:
         query_lower = query.lower()
         scored: list[tuple[float, dict[str, Any]]] = []
         for doc in self.documents:
-            if category and doc["category"] not in {category, "通用"}:
-                continue
             score = 0.0
             if category and (doc["category"] == category or doc["category"] == "通用"):
                 score += 4
@@ -119,11 +246,9 @@ class LangChainRAGService:
         self.collection: Any | None = None
         self.embeddings: OpenAIEmbeddings | None = None
         self.llm: ChatOpenAI | None = None
-        self.generation_client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url) if settings.llm_api_key else None
-        self.generation_available = self.generation_client is not None
 
         if not settings.use_langchain_rag or not settings.embedding_api_key or not settings.llm_api_key:
-            self.error = "向量 Embedding 未启用；当前使用本地词法检索 + 大模型生成。"
+            self.error = "缺少 LLM 或 Embedding 配置，LangChain RAG 未启用。"
             return
         try:
             if not VECTOR_DIR.exists() and not settings.auto_build_vector_store:
@@ -133,20 +258,6 @@ class LangChainRAGService:
             self.client = chromadb.PersistentClient(path=str(VECTOR_DIR))
             self.collection = self.client.get_or_create_collection(name="policy_docs")
             existing = self.collection.get()
-            manifest_path = VECTOR_DIR / VECTOR_MANIFEST
-            expected_hash = knowledge_base_hash(KB_DIR)
-            manifest_hash = None
-            if manifest_path.exists():
-                try:
-                    manifest_hash = json.loads(manifest_path.read_text(encoding="utf-8")).get("knowledge_base_hash")
-                except (OSError, json.JSONDecodeError):
-                    manifest_hash = None
-            if existing["ids"] and manifest_hash != expected_hash:
-                if not settings.auto_build_vector_store:
-                    self.error = "向量索引已过期。请运行 scripts/build_openai_vector_store.py --rebuild；当前使用最新知识库的本地检索。"
-                    return
-                self.collection.delete(ids=existing["ids"])
-                existing = {"ids": []}
             if not existing["ids"]:
                 if not settings.auto_build_vector_store:
                     self.error = "向量库为空。请运行 scripts/build_openai_vector_store.py 构建；当前使用本地规则检索。"
@@ -155,21 +266,103 @@ class LangChainRAGService:
                 texts = [f"{doc['title']}\n类别：{doc['category']}\n摘要：{doc['excerpt']}\n规则：{'；'.join(doc['guidance'])}" for doc in knowledge_base.documents]
                 metadatas = [{"doc_id": doc["id"], "title": doc["title"], "category": doc["category"], "citation": doc["citation"]} for doc in knowledge_base.documents]
                 ids = [doc["id"] for doc in knowledge_base.documents]
-                # Part 2: markdown SOP docs (chunked)
-                md_texts, md_metadatas, md_ids = _load_and_chunk_markdown_docs(KB_DIR)
-                texts.extend(md_texts)
-                metadatas.extend(md_metadatas)
-                ids.extend(md_ids)
+                # Part 2: all documents via full processing pipeline (parse → clean → chunk)
+                doc_texts, doc_metadatas, doc_ids = _load_and_process_documents(KB_DIR)
+                texts.extend(doc_texts)
+                metadatas.extend(doc_metadatas)
+                ids.extend(doc_ids)
                 vectors = self.embeddings.embed_documents(texts)
                 self.collection.add(ids=ids, documents=texts, metadatas=metadatas, embeddings=vectors)
-                manifest_path.write_text(json.dumps({"knowledge_base_hash": expected_hash}, ensure_ascii=False, indent=2), encoding="utf-8")
+                # Record lineage for document-sourced chunks
+                try:
+                    from app.config import DOCUMENT_DB_PATH
+                    from app.document.lineage import LineageTracker
+                    lineage = LineageTracker(DOCUMENT_DB_PATH)
+                    for meta in doc_metadatas:
+                        lineage.record(
+                            chunk_id=meta.get("doc_id", ""),
+                            source_file=meta.get("source_file", ""),
+                            source_section=meta.get("section_title", ""),
+                        )
+                except Exception as exc:
+                    logger.warning("Lineage recording failed: %s", exc)
             self.llm = ChatOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, model=settings.llm_model, temperature=0)
             self.available = True
         except Exception as exc:
             self.error = f"向量库初始化失败：{exc}。当前使用本地规则检索。"
 
-    def query(self, question: str, category: str | None = None, top_k: int = 3) -> dict[str, Any]:
+    def _fetch_parent_context(self, parent_id: str) -> str | None:
+        """Fetch the full parent section text for small-to-big retrieval."""
+        if not self.collection:
+            return None
+        try:
+            result = self.collection.get(ids=[parent_id], include=["documents"])
+            docs = result.get("documents", [])
+            return docs[0] if docs else None
+        except Exception:
+            return None
+
+    def _vector_search(self, query: str, top_k: int = 6) -> list[dict[str, Any]]:
+        if not self.available or not self.collection or not self.embeddings:
+            return []
+        embedding_start = time.perf_counter()
+        query_vector = self.embeddings.embed_query(query)
+        # Query more results to filter out parent chunks (we only want child chunks for retrieval)
+        result = self.collection.query(query_embeddings=[query_vector], n_results=top_k * 2)
+        distances = result.get("distances", [[]])[0] if result.get("distances") else []
+        results = []
+        for index, (metadata, document) in enumerate(zip(result.get("metadatas", [[]])[0], result.get("documents", [[]])[0])):
+            # Skip parent chunks — they're only used for context expansion
+            if metadata.get("is_parent"):
+                continue
+            distance = float(distances[index]) if index < len(distances) else 1.0
+            retrieval_score = max(0.0, 1.0 - distance)
+            parent_id = metadata.get("parent_id")
+            parent_context = self._fetch_parent_context(parent_id) if parent_id else None
+            excerpt_source = parent_context or document
+            results.append({
+                "id": metadata.get("doc_id"),
+                "title": metadata.get("title"),
+                "category": metadata.get("category"),
+                "citation": metadata.get("citation"),
+                "excerpt": summarize_text(excerpt_source, limit=300),
+                "chunk_excerpt": summarize_text(document, limit=220),
+                "parent_id": parent_id,
+                "retrieval_score": round(retrieval_score, 4),
+                "rerank_score": round(lexical_overlap_score(query, f"{metadata.get('title', '')} {document}"), 4),
+                "source": "vector_search",
+            })
+            if len(results) >= top_k:
+                break
+        return sorted(results, key=lambda item: (item["rerank_score"], item["retrieval_score"]), reverse=True)
+
+    def _lexical_search_results(self, query: str, category: str | None = None, top_k: int = 6) -> list[dict[str, Any]]:
+        docs = self.knowledge_base.lexical_search(query, category=category, top_k=top_k)
+        results = []
+        for rank, doc in enumerate(docs, start=1):
+            results.append({
+                "id": doc.get("id"),
+                "title": doc.get("title"),
+                "category": doc.get("category"),
+                "citation": doc.get("citation"),
+                "excerpt": doc.get("excerpt"),
+                "retrieval_score": round(1.0 - (rank - 1) * 0.1, 4),
+                "rerank_score": round(lexical_overlap_score(query, f"{doc.get('title', '')} {doc.get('excerpt', '')}"), 4),
+                "source": "lexical",
+            })
+        return results
+
+    def query(
+        self,
+        question: str,
+        category: str | None = None,
+        top_k: int = 3,
+        history: list[dict[str, str]] | None = None,
+        rewritten_query: str | None = None,
+    ) -> dict[str, Any]:
         start = time.perf_counter()
+        search_query = rewritten_query or question
+
         if not self.available or not self.collection or not self.embeddings:
             retrieval_start = time.perf_counter()
             docs = self.knowledge_base.lexical_search(question, category=category, top_k=top_k)
@@ -186,84 +379,69 @@ class LangChainRAGService:
                     "rerank_score": round(lexical_overlap_score(question, f"{doc.get('title', '')} {doc.get('excerpt', '')}"), 4),
                     "source": "lexical_fallback",
                 })
-            context = "\n\n".join(
-                f"[{doc['citation']}] {doc['title']}\n{doc['excerpt']}\n处理指引：{'；'.join(doc.get('guidance', []))}"
-                for doc in docs
-            ) or "未检索到明确条款"
-            prompt = (
-                "你是企业级售后客诉 Copilot。只允许依据给定 SOP 证据回答，不得编造规则或承诺执行退款。"
-                "请先给明确结论，再给依据和下一步；证据不足时明确建议人工复核。"
-                "回答最多 6 句话，禁止输出 Markdown 表格、代码块或逐行复述订单明细。\n\n"
-                f"问题：{question}\n\nSOP 证据：\n{context}"
-            )
-            generation_start = time.perf_counter()
-            model_trace: list[dict[str, Any]] = []
-            generation_error: str | None = None
-            if self.generation_client:
-                try:
-                    response = self.generation_client.chat.completions.create(
-                        model=self.settings.llm_model,
-                        temperature=0,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    answer = response.choices[0].message.content or "模型未返回有效内容，建议转人工复核。"
-                    token_usage = {"embedding_tokens": 0, **extract_usage(response)}
-                    model_trace.append({"stage": "rag_synthesis", "model": self.settings.llm_model, "provider": "openai_compatible"})
-                except Exception as exc:
-                    generation_error = str(exc)
-                    answer = "模型生成失败，已保留检索证据，建议转人工复核。"
-                    estimated = estimate_text_tokens(answer)
-                    token_usage = {"embedding_tokens": 0, "prompt_tokens": 0, "completion_tokens": estimated, "total_tokens": estimated}
+            if docs:
+                top_doc = docs[0]
+                guidance = "；".join(top_doc.get("guidance", [])[:3])
+                answer = f"基于 {top_doc['citation']}，建议先按以下口径处理：{guidance}"
             else:
-                answer = "未配置语言模型，已保留检索证据，建议转人工复核。"
-                estimated = estimate_text_tokens(answer)
-                token_usage = {"embedding_tokens": 0, "prompt_tokens": 0, "completion_tokens": estimated, "total_tokens": estimated}
-            generation_ms = round((time.perf_counter() - generation_start) * 1000, 2)
+                answer = "LangChain RAG 当前未启用，且本地规则检索未命中明确条款，建议转人工复核。"
+            token_usage = {
+                "embedding_tokens": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": estimate_text_tokens(answer),
+                "total_tokens": estimate_text_tokens(answer),
+            }
+            rewrite_applied = rewritten_query is not None and rewritten_query != question
+            fallback_metrics = compute_online_metrics(question, fallback_sources, answer, rewrite_applied)
             return {
                 "available": False,
                 "answer": answer,
                 "sources": fallback_sources,
-                "fallback_reason": generation_error,
-                "retrieval_mode": "lexical",
-                "generation_mode": "llm" if model_trace else "deterministic_fallback",
+                "fallback_reason": self.error or "未初始化",
                 "retrieval_ms": retrieval_ms,
                 "embedding_ms": 0,
-                "generation_ms": generation_ms,
+                "generation_ms": 0,
                 "total_ms": round((time.perf_counter() - start) * 1000, 2),
                 "token_usage": token_usage,
                 "cost_breakdown": estimate_cost_breakdown(self.settings, token_usage),
-                "model_trace": model_trace,
+                "retrieval_mode": "lexical_fallback",
+                "online_metrics": {
+                    "retrieval_diversity": fallback_metrics.retrieval_diversity,
+                    "retrieval_confidence": fallback_metrics.retrieval_confidence,
+                    "coverage_score": fallback_metrics.coverage_score,
+                    "has_citations": fallback_metrics.has_citations,
+                    "query_rewrite_applied": fallback_metrics.query_rewrite_applied,
+                },
             }
-        embedding_start = time.perf_counter()
-        query_vector = self.embeddings.embed_query(question)
-        embedding_ms = round((time.perf_counter() - embedding_start) * 1000, 2)
+
         retrieval_start = time.perf_counter()
-        query_kwargs: dict[str, Any] = {
-            "query_embeddings": [query_vector],
-            "n_results": max(top_k * 2, 6),
-        }
-        if category:
-            query_kwargs["where"] = {"$or": [{"category": category}, {"category": "通用"}]}
-        result = self.collection.query(**query_kwargs)
+        vector_results = self._vector_search(search_query, top_k=top_k * 2)
+        lexical_results = self._lexical_search_results(search_query, category=category, top_k=top_k * 2)
+
+        if vector_results and lexical_results:
+            matched = reciprocal_rank_fusion([vector_results, lexical_results], k=60)[:top_k]
+            retrieval_mode = "hybrid_rrf"
+        elif vector_results:
+            matched = vector_results[:top_k]
+            retrieval_mode = "vector_only"
+        else:
+            matched = lexical_results[:top_k]
+            retrieval_mode = "lexical_only"
         retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
-        matched = []
-        distances = result.get("distances", [[]])[0] if result.get("distances") else []
-        for index, (metadata, document) in enumerate(zip(result.get("metadatas", [[]])[0], result.get("documents", [[]])[0])):
-            distance = float(distances[index]) if index < len(distances) else 1.0
-            retrieval_score = max(0.0, 1.0 - distance)
-            matched.append({
-                "id": metadata.get("doc_id"),
-                "title": metadata.get("title"),
-                "category": metadata.get("category"),
-                "citation": metadata.get("citation"),
-                "excerpt": summarize_text(document, limit=220),
-                "retrieval_score": round(retrieval_score, 4),
-                "rerank_score": round(lexical_overlap_score(question, f"{metadata.get('title', '')} {document}"), 4),
-                "source": "vector_search",
-            })
-        matched = sorted(matched, key=lambda item: (item["rerank_score"], item["retrieval_score"]), reverse=True)[:top_k]
+
         context = "\n\n".join([f"[{item['citation']}] {item['title']} - {item['excerpt']}" for item in matched])
-        prompt = "你是企业级售后 Copilot。请只基于给定上下文回答，不能编造规则。如果上下文不足，请明确说需要人工复核。\n\n" + f"问题：{question}\n\n上下文：\n{context}"
+
+        history_text = ""
+        if history:
+            recent = history[-6:]
+            history_text = "\n".join(f"{m['role']}: {m['content']}" for m in recent)
+
+        prompt_parts = ["你是企业级售后 Copilot。请只基于给定上下文回答，不能编造规则。如果上下文不足，请明确说需要人工复核。"]
+        if history_text:
+            prompt_parts.append(f"\n对话历史：\n{history_text}")
+        prompt_parts.append(f"\n问题：{question}\n\n上下文：\n{context}")
+        prompt = "\n".join(prompt_parts)
+
         generation_start = time.perf_counter()
         llm_usage = extract_langchain_usage(None, prompt=prompt, answer="")
         try:
@@ -278,24 +456,31 @@ class LangChainRAGService:
             answer = f"LangChain RAG 检索到了文档，但回答生成失败：{exc}"
             llm_usage = extract_langchain_usage(None, prompt=prompt, answer=answer)
         generation_ms = round((time.perf_counter() - generation_start) * 1000, 2)
-        embedding_tokens = estimate_text_tokens(question)
+        embedding_tokens = estimate_text_tokens(search_query)
         token_usage = {
             "embedding_tokens": embedding_tokens,
             "prompt_tokens": int(llm_usage.get("prompt_tokens", 0)),
             "completion_tokens": int(llm_usage.get("completion_tokens", 0)),
             "total_tokens": embedding_tokens + int(llm_usage.get("prompt_tokens", 0)) + int(llm_usage.get("completion_tokens", 0)),
         }
+        rewrite_applied = rewritten_query is not None and rewritten_query != question
+        online_metrics = compute_online_metrics(question, matched, answer, rewrite_applied)
         return {
             "available": True,
             "answer": answer,
             "sources": matched,
             "retrieval_ms": retrieval_ms,
-            "embedding_ms": embedding_ms,
+            "embedding_ms": 0,
             "generation_ms": generation_ms,
             "total_ms": round((time.perf_counter() - start) * 1000, 2),
             "token_usage": token_usage,
             "cost_breakdown": estimate_cost_breakdown(self.settings, token_usage),
-            "retrieval_mode": "vector",
-            "generation_mode": "llm" if self.llm else "deterministic_fallback",
-            "model_trace": [{"stage": "rag_synthesis", "model": self.settings.llm_model, "provider": "openai_compatible"}] if self.llm else [],
+            "retrieval_mode": retrieval_mode,
+            "online_metrics": {
+                "retrieval_diversity": online_metrics.retrieval_diversity,
+                "retrieval_confidence": online_metrics.retrieval_confidence,
+                "coverage_score": online_metrics.coverage_score,
+                "has_citations": online_metrics.has_citations,
+                "query_rewrite_applied": online_metrics.query_rewrite_applied,
+            },
         }

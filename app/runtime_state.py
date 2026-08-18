@@ -10,8 +10,10 @@ from app.config import (
     AUTH_DB_PATH,
     BASE_DIR,
     DATA_DIR,
+    DOCUMENT_DB_PATH,
     KB_DIR,
     SQLITE_DB_PATH,
+    VERSIONS_DIR,
     Settings,
     load_dotenv_file,
 )
@@ -21,6 +23,12 @@ from app.rag import PolicyKnowledgeBase
 from app.stores import RedisRuntime, TaskQueueStore, UserStore
 from app.ticket_store import MySQLReadOnlyTicketStore, ReadOnlySQLiteStore
 from app.tool_registry import ToolRegistry
+from app.document.parser import DocumentParser
+from app.document.cleaner import DataCleaner
+from app.document.chunking import ChunkingEngine
+from app.document.version import VersionManager
+from app.document.lineage import LineageTracker
+from app.document.audit import AuditLogger
 
 
 @dataclass
@@ -38,6 +46,12 @@ class RuntimeState:
     orchestrator: Orchestrator
     tool_registry: ToolRegistry
     langgraph_workflow: LangGraphWorkflow
+    doc_parser: DocumentParser
+    doc_cleaner: DataCleaner
+    chunking_engine: ChunkingEngine
+    version_manager: VersionManager
+    lineage_tracker: LineageTracker
+    doc_audit: AuditLogger
 
 
 _runtime_state: RuntimeState | None = None
@@ -68,6 +82,12 @@ def initialize_runtime() -> RuntimeState:
         )
         runtime_tool_registry = ToolRegistry(runtime_orchestrator.function_agent)
         runtime_langgraph_workflow = LangGraphWorkflow(runtime_orchestrator)
+        runtime_doc_parser = DocumentParser()
+        runtime_doc_cleaner = DataCleaner()
+        runtime_chunking_engine = ChunkingEngine()
+        runtime_version_manager = VersionManager(DOCUMENT_DB_PATH, VERSIONS_DIR)
+        runtime_lineage_tracker = LineageTracker(DOCUMENT_DB_PATH)
+        runtime_doc_audit = AuditLogger(DOCUMENT_DB_PATH)
         _runtime_state = RuntimeState(
             settings=runtime_settings,
             redis_runtime=runtime_redis,
@@ -82,6 +102,12 @@ def initialize_runtime() -> RuntimeState:
             orchestrator=runtime_orchestrator,
             tool_registry=runtime_tool_registry,
             langgraph_workflow=runtime_langgraph_workflow,
+            doc_parser=runtime_doc_parser,
+            doc_cleaner=runtime_doc_cleaner,
+            chunking_engine=runtime_chunking_engine,
+            version_manager=runtime_version_manager,
+            lineage_tracker=runtime_lineage_tracker,
+            doc_audit=runtime_doc_audit,
         )
     return _runtime_state
 

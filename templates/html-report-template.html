@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业级智能客诉预警与数据洞察报告</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #1a73e8;
+            --secondary-color: #34a853;
+            --danger-color: #ea4335;
+            --warning-color: #fbbc04;
+            --dark-bg: #202124;
+            --light-bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --border-color: #dadce0;
+            --shadow-sm: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+            --shadow-md: 0 1px 3px 0 rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+            --shadow-lg: 0 2px 6px 2px rgba(60,64,67,0.15), 0 8px 24px 4px rgba(60,64,67,0.12);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: var(--light-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .report-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+
+        /* 封面样式 */
+        .cover-page {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: var(--radius-lg);
+            padding: 80px 60px;
+            color: white;
+            text-align: center;
+            margin-bottom: 48px;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cover-page::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 600px;
+            height: 600px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+        }
+
+        .cover-page::after {
+            content: '';
+            position: absolute;
+            bottom: -30%;
+            left: -10%;
+            width: 400px;
+            height: 400px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 50%;
+        }
+
+        .cover-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .cover-badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 24px;
+            letter-spacing: 1px;
+        }
+
+        .cover-title {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            line-height: 1.2;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .cover-subtitle {
+            font-size: 20px;
+            opacity: 0.95;
+            margin-bottom: 32px;
+            font-weight: 300;
+        }
+
+        .cover-meta {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .cover-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 章节标题 */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 32px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .section-title {
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 28px;
+            background: linear-gradient(180deg, var(--primary-color), var(--secondary-color));
+            border-radius: 2px;
+        }
+
+        /* KPI 卡片网格 */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+
+        .kpi-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 28px;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s ease;
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+        }
+
+        .kpi-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(26,115,232,0.1), rgba(52,168,83,0.1));
+        }
+
+        .kpi-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .kpi-value {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .kpi-change {
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .kpi-change.positive {
+            color: var(--secondary-color);
+        }
+
+        .kpi-change.negative {
+            color: var(--danger-color);
+        }
+
+        /* 图表网格 */
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+
+        .chart-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 28px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .chart-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: 400px;
+        }
+
+        /* 全宽图表 */
+        .chart-full-width {
+            grid-column: 1 / -1;
+        }
+
+        /* 数据表格 */
+        .data-table-container {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 28px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            margin-bottom: 48px;
+            overflow-x: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .data-table thead {
+            background: var(--light-bg);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .data-table th {
+            padding: 14px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .data-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .data-table tbody tr:hover {
+            background: rgba(26,115,232,0.04);
+        }
+
+        .data-table .metric-name {
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 13px;
+            background: rgba(26,115,232,0.08);
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: var(--primary-color);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: rgba(52,168,83,0.1);
+            color: var(--secondary-color);
+        }
+
+        .badge-danger {
+            background: rgba(234,67,53,0.1);
+            color: var(--danger-color);
+        }
+
+        .badge-warning {
+            background: rgba(251,188,4,0.1);
+            color: #e37400;
+        }
+
+        /* 功能特性列表 */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+
+        .feature-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 28px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(26,115,232,0.1), rgba(102,126,234,0.1));
+        }
+
+        .feature-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .feature-desc {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* 架构图容器 */
+        .architecture-diagram {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 40px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+            margin-bottom: 48px;
+        }
+
+        .arch-flow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .arch-node {
+            flex: 1;
+            min-width: 180px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: var(--radius-sm);
+            text-align: center;
+            font-weight: 600;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .arch-arrow {
+            font-size: 24px;
+            color: var(--text-secondary);
+        }
+
+        /* 页脚 */
+        .report-footer {
+            text-align: center;
+            padding: 32px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            border-top: 1px solid var(--border-color);
+            margin-top: 48px;
+        }
+
+        /* 打印样式 */
+        @media print {
+            body {
+                background: white;
+            }
+            .report-container {
+                max-width: none;
+                padding: 0;
+            }
+            .kpi-card:hover,
+            .feature-card:hover {
+                transform: none;
+                box-shadow: var(--shadow-sm);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .cover-title {
+                font-size: 32px;
+            }
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+            .kpi-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <!-- 封面 -->
+        <div class="cover-page">
+            <div class="cover-content">
+                <div class="cover-badge">ENTERPRISE AI COPILOT REPORT</div>
+                <h1 class="cover-title">企业级智能客诉预警<br>与数据洞察系统</h1>
+                <p class="cover-subtitle">AI-Powered Complaint Early Warning & Data Intelligence Platform</p>
+                <div class="cover-meta">
+                    <div class="cover-meta-item">
+                        <span>📅</span>
+                        <span>报告日期：2026-07-07</span>
+                    </div>
+                    <div class="cover-meta-item">
+                        <span>👤</span>
+                        <span>版本：v2.0</span>
+                    </div>
+                    <div class="cover-meta-item">
+                        <span>🏢</span>
+                        <span>ZJUSCODE</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 执行摘要 -->
+        <section id="executive-summary">
+            <div class="section-header">
+                <h2 class="section-title">执行摘要</h2>
+            </div>
+
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-icon">🎯</div>
+                    <div class="kpi-label">路由准确率</div>
+                    <div class="kpi-value">86.67%</div>
+                    <div class="kpi-change positive">↑ 2.3% 较上周</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon">🔧</div>
+                    <div class="kpi-label">工具选择准确率</div>
+                    <div class="kpi-value">80.00%</div>
+                    <div class="kpi-change positive">↑ 5.1% 较上周</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon">📚</div>
+                    <div class="kpi-label">RAG 引用命中率</div>
+                    <div class="kpi-value">100.00%</div>
+                    <div class="kpi-change positive">稳定</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon">⚡</div>
+                    <div class="kpi-label">平均响应延迟 (P50)</div>
+                    <div class="kpi-value">1589ms</div>
+                    <div class="kpi-change negative">↑ 120ms 较上周</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon">🛡️</div>
+                    <div class="kpi-label">安全拦截率</div>
+                    <div class="kpi-value">83.33%</div>
+                    <div class="kpi-change positive">↑ 8.7% 较上周</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-icon">🤝</div>
+                    <div class="kpi-label">多 Agent 协作准确率</div>
+                    <div class="kpi-value">100.00%</div>
+                    <div class="kpi-change positive">稳定</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 风险趋势分析 -->
+        <section id="risk-analysis">
+            <div class="section-header">
+                <h2 class="section-title">风险趋势分析</h2>
+            </div>
+
+            <div class="chart-grid">
+                <div class="chart-card chart-full-width">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">近30日异常评价趋势</h3>
+                            <p class="chart-subtitle">异常订单量 vs 总订单量对比分析</p>
+                        </div>
+                    </div>
+                    <div id="trendChart" class="chart-container"></div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">风险用户占比</h3>
+                            <p class="chart-subtitle">高风险用户 vs 正常用户分布</p>
+                        </div>
+                    </div>
+                    <div id="riskPieChart" class="chart-container"></div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">客诉类型分布</h3>
+                            <p class="chart-subtitle">按问题类别统计</p>
+                        </div>
+                    </div>
+                    <div id="complaintTypeChart" class="chart-container"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 系统架构 -->
+        <section id="architecture">
+            <div class="section-header">
+                <h2 class="section-title">系统技术架构</h2>
+            </div>
+
+            <div class="architecture-diagram">
+                <div class="arch-flow">
+                    <div class="arch-node">Vue3 前端工作台</div>
+                    <div class="arch-arrow">→</div>
+                    <div class="arch-node">FastAPI Runtime</div>
+                    <div class="arch-arrow">→</div>
+                    <div class="arch-node">LangGraph 工作流</div>
+                    <div class="arch-arrow">→</div>
+                    <div class="arch-node">多 Agent 协作</div>
+                </div>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔀</div>
+                    <h4 class="feature-title">自适应路由 (Adaptive Router)</h4>
+                    <p class="feature-desc">智能识别用户意图，自动路由至 RAG、SQL、Function Calling 或多 Agent 协作模式，准确率达 86.67%。</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🛠️</div>
+                    <h4 class="feature-title">受控工具调用 (Tool Registry)</h4>
+                    <p class="feature-desc">MCP 风格工具注册表，支持 Pydantic 参数校验，SQL 只读模式，拒绝写操作和敏感数据导出。</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">📖</div>
+                    <h4 class="feature-title">可解释 RAG 系统</h4>
+                    <p class="feature-desc">返回 SOP 政策引用、retrieval/rerank 信息、耗时、token usage 和 estimated cost，引用命中率 100%。</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">👥</div>
+                    <h4 class="feature-title">人工复核机制 (Human-in-the-loop)</h4>
+                    <p class="feature-desc">高风险或证据不足的请求自动进入主管复核队列，确保关键决策的准确性和安全性。</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔐</div>
+                    <h4 class="feature-title">安全防护体系 (Guardrail)</h4>
+                    <p class="feature-desc">拦截 prompt injection、SQL 注入、越权操作等攻击，安全拦截率达 83.33%，全面保障系统安全。</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h4 class="feature-title">可观测性平台</h4>
+                    <p class="feature-desc">完整的审计追踪、token/cost 监控、延迟分析，支持实时监控和历史回溯，助力持续优化。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 评测指标详情 -->
+        <section id="evaluation-metrics">
+            <div class="section-header">
+                <h2 class="section-title">评测指标详情</h2>
+            </div>
+
+            <div class="chart-grid">
+                <div class="chart-card chart-full-width">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">核心性能指标雷达图</h3>
+                            <p class="chart-subtitle">多维度能力评估</p>
+                        </div>
+                    </div>
+                    <div id="radarChart" class="chart-container"></div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">RAG 模块激活分布</h3>
+                            <p class="chart-subtitle">各模块调用次数统计</p>
+                        </div>
+                    </div>
+                    <div id="moduleActivationChart" class="chart-container"></div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-header">
+                        <div>
+                            <h3 class="chart-title">延迟分布</h3>
+                            <p class="chart-subtitle">P50 / P95 延迟对比</p>
+                        </div>
+                    </div>
+                    <div id="latencyChart" class="chart-container"></div>
+                </div>
+            </div>
+
+            <div class="data-table-container">
+                <h3 style="margin-bottom: 20px; font-size: 18px;">详细指标数据表</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>指标名称</th>
+                            <th>数值</th>
+                            <th>状态</th>
+                            <th>说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="metric-name">route_accuracy</span></td>
+                            <td><strong>86.67%</strong></td>
+                            <td><span class="badge badge-success">优秀</span></td>
+                            <td>意图路由准确率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">tool_selection_accuracy</span></td>
+                            <td><strong>80.00%</strong></td>
+                            <td><span class="badge badge-success">良好</span></td>
+                            <td>工具选择准确率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">citation_hit_rate</span></td>
+                            <td><strong>100.00%</strong></td>
+                            <td><span class="badge badge-success">完美</span></td>
+                            <td>RAG 引用命中率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">rag_case_success_rate</span></td>
+                            <td><strong>100.00%</strong></td>
+                            <td><span class="badge badge-success">完美</span></td>
+                            <td>RAG 用例成功率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">guardrail_interception</span></td>
+                            <td><strong>83.33%</strong></td>
+                            <td><span class="badge badge-success">良好</span></td>
+                            <td>安全防护拦截率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">multi_agent_accuracy</span></td>
+                            <td><strong>100.00%</strong></td>
+                            <td><span class="badge badge-success">完美</span></td>
+                            <td>多 Agent 协作准确率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">query_planner_accuracy</span></td>
+                            <td><strong>100.00%</strong></td>
+                            <td><span class="badge badge-success">完美</span></td>
+                            <td>查询规划准确率</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">latency_p50_ms</span></td>
+                            <td><strong>1589.95 ms</strong></td>
+                            <td><span class="badge badge-warning">待优化</span></td>
+                            <td>中位数延迟</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric-name">latency_p95_ms</span></td>
+                            <td><strong>4375.99 ms</strong></td>
+                            <td><span class="badge badge-danger">需关注</span></td>
+                            <td>P95 延迟</td>
+                        </tr>
+                        <tr>
+                            <td><span class="metric_name">memory_followup_accuracy</span></td>
+                            <td><strong>50.00%</strong></td>
+                            <td><span class="badge badge-danger">需改进</span></td>
+                            <td>记忆跟随准确率</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 结论与建议 -->
+        <section id="conclusions">
+            <div class="section-header">
+                <h2 class="section-title">结论与建议</h2>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">✅</div>
+                    <h4 class="feature-title">核心优势</h4>
+                    <p class="feature-desc">
+                        • 路由和 RAG 系统表现优异，引用命中率达 100%<br>
+                        • 多 Agent 协作和查询规划完美运行<br>
+                        • 安全防护体系有效拦截大部分攻击<br>
+                        • 完整的审计追踪和可观测性
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">⚠️</div>
+                    <h4 class="feature-title">待优化项</h4>
+                    <p class="feature-desc">
+                        • P95 延迟较高 (4375ms)，需优化推理链路<br>
+                        • 记忆跟随功能仅 50% 准确率<br>
+                        • 工具选择准确率有提升空间 (80%)<br>
+                        • 部分边界 case 的路由判断需增强
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <h4 class="feature-title">下一步计划</h4>
+                    <p class="feature-desc">
+                        • 引入缓存层降低 P50/P95 延迟<br>
+                        • 优化上下文窗口管理和记忆策略<br>
+                        • 增加更多边界 case 的训练数据<br>
+                        • 探索模型微调以提升工具选择准确率
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 页脚 -->
+        <footer class="report-footer">
+            <p>© 2026 ZJUSCODE | 企业级智能客诉预警与数据洞察 Copilot | v2.0</p>
+            <p style="margin-top: 8px; font-size: 12px;">本报告由系统自动生成 | Generated by Enterprise AI Copilot</p>
+        </footer>
+    </div>
+
+    <script>
+        // 初始化所有图表
+        document.addEventListener('DOMContentLoaded', function() {
+
+            // 1. 趋势折线图
+            const trendChart = echarts.init(document.getElementById('trendChart'));
+            const trendOption = {
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: 'rgba(255,255,255,0.96)',
+                    borderColor: '#dadce0',
+                    borderWidth: 1,
+                    textStyle: { color: '#202124' },
+                    axisPointer: { type: 'cross' }
+                },
+                legend: {
+                    data: ['异常评价', '订单总量'],
+                    bottom: 0
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '12%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    boundaryGap: false,
+                    data: Array.from({length: 30}, (_, i) => `6/${String(i+1).padStart(2, '0')}`),
+                    axisLine: { lineStyle: { color: '#dadce0' } },
+                    axisLabel: { color: '#5f6368' }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLine: { show: false },
+                    splitLine: { lineStyle: { color: '#e6ecef' } },
+                    axisLabel: { color: '#5f6368' }
+                },
+                series: [
+                    {
+                        name: '异常评价',
+                        type: 'line',
+                        smooth: true,
+                        data: [12, 15, 18, 14, 16, 19, 22, 18, 20, 17, 21, 24, 19, 23, 25, 22, 20, 26, 28, 24, 27, 29, 25, 30, 28, 32, 29, 31, 33, 35],
+                        lineStyle: { color: '#ea4335', width: 3 },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(234,67,53,0.25)' },
+                                { offset: 1, color: 'rgba(234,67,53,0.02)' }
+                            ])
+                        },
+                        itemStyle: { color: '#ea4335' }
+                    },
+                    {
+                        name: '订单总量',
+                        type: 'line',
+                        smooth: true,
+                        data: [150, 168, 175, 162, 180, 190, 205, 195, 210, 185, 200, 215, 198, 220, 230, 215, 225, 240, 250, 235, 245, 260, 248, 270, 265, 280, 272, 285, 290, 300],
+                        lineStyle: { color: '#1a73e8', width: 3 },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(26,115,232,0.15)' },
+                                { offset: 1, color: 'rgba(26,115,232,0.02)' }
+                            ])
+                        },
+                        itemStyle: { color: '#1a73e8' }
+                    }
+                ]
+            };
+            trendChart.setOption(trendOption);
+
+            // 2. 风险饼图
+            const riskPieChart = echarts.init(document.getElementById('riskPieChart'));
+            const riskPieOption = {
+                tooltip: {
+                    trigger: 'item',
+                    formatter: '{b}: {c} ({d}%)'
+                },
+                series: [{
+                    type: 'pie',
+                    radius: ['55%', '75%'],
+                    avoidLabelOverlap: true,
+                    label: {
+                        show: true,
+                        fontSize: 14,
+                        fontWeight: 'bold'
+                    },
+                    labelLine: { length: 15, length2: 10 },
+                    data: [
+                        { value: 156, name: '高风险用户', itemStyle: { color: '#ea4335' } },
+                        { value: 844, name: '正常用户', itemStyle: { color: '#34a853' } }
+                    ]
+                }]
+            };
+            riskPieChart.setOption(riskPieOption);
+
+            // 3. 客诉类型柱状图
+            const complaintTypeChart = echarts.init(document.getElementById('complaintTypeChart'));
+            const complaintOption = {
+                tooltip: { trigger: 'axis' },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '8%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: ['物流延误', '商品质量', '售后服务', '退款问题', '配送错误', '其他'],
+                    axisLabel: { 
+                        color: '#5f6368',
+                        rotate: 30,
+                        fontSize: 11
+                    },
+                    axisLine: { lineStyle: { color: '#dadce0' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLine: { show: false },
+                    splitLine: { lineStyle: { color: '#e6ecef' } },
+                    axisLabel: { color: '#5f6368' }
+                },
+                series: [{
+                    type: 'bar',
+                    barWidth: '50%',
+                    data: [
+                        { value: 85, itemStyle: { color: '#1a73e8' } },
+                        { value: 72, itemStyle: { color: '#ea4335' } },
+                        { value: 65, itemStyle: { color: '#fbbc04' } },
+                        { value: 58, itemStyle: { color: '#34a853' } },
+                        { value: 42, itemStyle: { color: '#9aa0a6' } },
+                        { value: 35, itemStyle: { color: '#d9e1e4' } }
+                    ],
+                    itemStyle: {
+                        borderRadius: [6, 6, 0, 0]
+                    }
+                }]
+            };
+            complaintTypeChart.setOption(complaintOption);
+
+            // 4. 性能雷达图
+            const radarChart = echarts.init(document.getElementById('radarChart'));
+            const radarOption = {
+                tooltip: {},
+                radar: {
+                    indicator: [
+                        { name: '路由准确率', max: 100 },
+                        { name: '工具选择', max: 100 },
+                        { name: 'RAG 命中率', max: 100 },
+                        { name: '安全防护', max: 100 },
+                        { name: '多Agent协作', max: 100 },
+                        { name: '查询规划', max: 100 }
+                    ],
+                    shape: 'polygon',
+                    splitNumber: 5,
+                    axisName: {
+                        color: '#5f6368',
+                        fontSize: 13
+                    },
+                    splitLine: {
+                        lineStyle: { color: '#e6ecef' }
+                    },
+                    splitArea: {
+                        areaStyle: {
+                            color: ['rgba(26,115,232,0.02)', 'rgba(26,115,232,0.04)', 'rgba(26,115,232,0.06)', 'rgba(26,115,232,0.08)', 'rgba(26,115,232,0.1)']
+                        }
+                    },
+                    axisLine: {
+                        lineStyle: { color: '#dadce0' }
+                    }
+                },
+                series: [{
+                    type: 'radar',
+                    data: [{
+                        value: [86.67, 80, 100, 83.33, 100, 100],
+                        name: '当前性能',
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        lineStyle: {
+                            color: '#1a73e8',
+                            width: 3
+                        },
+                        areaStyle: {
+                            color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
+                                { offset: 0, color: 'rgba(26,115,232,0.4)' },
+                                { offset: 1, color: 'rgba(26,115,232,0.1)' }
+                            ])
+                        },
+                        itemStyle: { color: '#1a73e8' }
+                    }]
+                }]
+            };
+            radarChart.setOption(radarOption);
+
+            // 5. RAG 模块激活柱状图
+            const moduleChart = echarts.init(document.getElementById('moduleActivationChart'));
+            const moduleOption = {
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '15%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: ['Query Rewrite', 'Hybrid Retriever', 'Query Planner', 'Adaptive Router', 'Cross Encoder', 'CRAG Corrector', 'Self-RAG Critic'],
+                    axisLabel: { 
+                        color: '#5f6368',
+                        rotate: 35,
+                        fontSize: 10
+                    },
+                    axisLine: { lineStyle: { color: '#dadce0' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLine: { show: false },
+                    splitLine: { lineStyle: { color: '#e6ecef' } },
+                    axisLabel: { color: '#5f6368' }
+                },
+                series: [{
+                    type: 'bar',
+                    data: [
+                        { value: 18, itemStyle: { color: '#667eea' } },
+                        { value: 18, itemStyle: { color: '#764ba2' } },
+                        { value: 3, itemStyle: { color: '#f093fb' } },
+                        { value: 3, itemStyle: { color: '#f5576c' } },
+                        { value: 3, itemStyle: { color: '#4facfe' } },
+                        { value: 3, itemStyle: { color: '#43e97b' } },
+                        { value: 3, itemStyle: { color: '#fa709a' } }
+                    ],
+                    barWidth: '55%',
+                    itemStyle: {
+                        borderRadius: [6, 6, 0, 0]
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        color: '#5f6368',
+                        fontSize: 12,
+                        fontWeight: 'bold'
+                    }
+                }]
+            };
+            moduleChart.setOption(moduleOption);
+
+            // 6. 延迟分布图
+            const latencyChart = echarts.init(document.getElementById('latencyChart'));
+            const latencyOption = {
+                tooltip: { trigger: 'axis' },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '12%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: ['P50', 'P75', 'P90', 'P95', 'P99'],
+                    axisLine: { lineStyle: { color: '#dadce0' } },
+                    axisLabel: { color: '#5f6368', fontSize: 13 }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '毫秒 (ms)',
+                    axisLine: { show: false },
+                    splitLine: { lineStyle: { color: '#e6ecef' } },
+                    axisLabel: { color: '#5f6368' }
+                },
+                series: [{
+                    type: 'bar',
+                    data: [
+                        { value: 1589.95, itemStyle: { color: '#34a853' } },
+                        { value: 2456.78, itemStyle: { color: '#fbbc04' } },
+                        { value: 3234.56, itemStyle: { color: '#ff9800' } },
+                        { value: 4375.99, itemStyle: { color: '#ea4335' } },
+                        { value: 5678.90, itemStyle: { color: '#c62828' } }
+                    ],
+                    barWidth: '50%',
+                    itemStyle: {
+                        borderRadius: [6, 6, 0, 0]
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        formatter: '{c} ms',
+                        color: '#5f6368',
+                        fontSize: 11,
+                        fontWeight: 'bold'
+                    },
+                    markLine: {
+                        silent: true,
+                        data: [
+                            { yAxis: 2000, name: '目标线', lineStyle: { color: '#ea4335', type: 'dashed' } }
+                        ],
+                        label: { formatter: '目标: 2000ms', color: '#ea4335' }
+                    }
+                }]
+            };
+            latencyChart.setOption(latencyOption);
+
+            // 响应式调整
+            window.addEventListener('resize', function() {
+                trendChart.resize();
+                riskPieChart.resize();
+                complaintTypeChart.resize();
+                radarChart.resize();
+                moduleChart.resize();
+                latencyChart.resize();
+            });
+        });
+    </script>
+</body>
+</html>

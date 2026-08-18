@@ -137,11 +137,37 @@ def validate_readonly_sql(sql: str) -> str:
 
 
 def lexical_overlap_score(query: str, text: str) -> float:
-    query_tokens = set(re.findall(r"[\w\u4e00-\u9fff]{2,}", query.lower()))
-    text_tokens = set(re.findall(r"[\w\u4e00-\u9fff]{2,}", text.lower()))
+    query_tokens = set(re.findall(r"[\u4e00-\u9fff]|[a-z0-9]{2,}", query.lower()))
+    text_tokens = set(re.findall(r"[\u4e00-\u9fff]|[a-z0-9]{2,}", text.lower()))
     if not query_tokens or not text_tokens:
         return 0.0
     return len(query_tokens & text_tokens) / max(len(query_tokens), 1)
+
+
+def find_citation_answer_mapping(answer: str, citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map each citation to the best-matching sentence in the answer."""
+    if not answer or not citations:
+        return []
+    sentences = re.split(r"(?<=[\u3002\uff01\uff1f\n])", answer)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    mappings = []
+    for idx, citation in enumerate(citations):
+        citation_text = f"{citation.get('label', '')} {citation.get('text', '')}"
+        best_score = 0.0
+        best_sentence = ""
+        for sent in sentences:
+            score = lexical_overlap_score(citation_text, sent)
+            if score > best_score:
+                best_score = score
+                best_sentence = sent
+        if best_sentence and best_score > 0.05:
+            mappings.append({
+                "citation_index": idx,
+                "citation_label": citation.get("label", ""),
+                "answer_excerpt": best_sentence,
+                "match_score": round(best_score, 4),
+            })
+    return mappings
 
 
 def extract_usage(response: Any) -> dict[str, int]:

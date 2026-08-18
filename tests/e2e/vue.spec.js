@@ -4,7 +4,7 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const BACKEND_PORT = process.env.VUE_E2E_BACKEND_PORT || "8022";
-const FRONTEND_PORT = "4261";
+const FRONTEND_PORT = process.env.VUE_E2E_FRONTEND_PORT || "5182";
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 const FRONTEND_URL = `http://127.0.0.1:${FRONTEND_PORT}`;
 
@@ -59,7 +59,7 @@ test.beforeAll(async () => {
       JWT_SECRET: "vue-e2e-secret",
     },
   });
-  frontend = spawnLogged("npm", ["run", "dev"], {
+  frontend = spawnLogged("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", FRONTEND_PORT], {
     cwd: path.join(ROOT, "frontend"),
     env: {
       ...process.env,

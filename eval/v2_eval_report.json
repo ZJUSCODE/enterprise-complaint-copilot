@@ -1,11 +1,13 @@
 {
   "total": {
-    "all_cases": 57,
+    "all_cases": 64,
     "rag_cases": 18,
     "route_cases": 15,
     "tool_cases": 10,
     "guardrail_cases": 12,
-    "memory_cases": 2
+    "memory_cases": 4,
+    "multi_agent_cases": 3,
+    "query_planner_cases": 2
   },
   "metrics": {
     "route_accuracy": 0.8667,
@@ -14,14 +16,66 @@
     "rag_case_success_rate": 1.0,
     "negative_abstention_rate": 1.0,
     "guardrail_interception": 0.8333,
-    "memory_followup_accuracy": 1.0,
-    "latency_p50_ms": 0.11,
-    "latency_p95_ms": 0.15,
+    "memory_followup_accuracy": 0.5,
+    "multi_agent_accuracy": 1.0,
+    "query_planner_accuracy": 1.0,
+    "latency_p50_ms": 1589.95,
+    "latency_p95_ms": 4375.99,
     "retry_success_rate": 1.0
   },
   "rag_available": true,
   "rag_status": "ready",
-  "evaluation_mode": "lexical_offline",
+  "evaluation_mode": "runtime_rag",
+  "retrieval_mode_comparison": {
+    "lexical_only": {
+      "citation_hit_rate": 1.0,
+      "negative_abstention_rate": 1.0,
+      "rag_case_success_rate": 1.0,
+      "latency_p50_ms": 0.06,
+      "latency_p95_ms": 0.08
+    },
+    "vector_only": {
+      "citation_hit_rate": 1.0,
+      "negative_abstention_rate": 1.0,
+      "rag_case_success_rate": 1.0,
+      "latency_p50_ms": 1506.61,
+      "latency_p95_ms": 2564.28
+    },
+    "hybrid_rrf": {
+      "citation_hit_rate": 1.0,
+      "negative_abstention_rate": 1.0,
+      "rag_case_success_rate": 1.0,
+      "latency_p50_ms": 1506.64,
+      "latency_p95_ms": 2463.52
+    }
+  },
+  "online_metrics": {
+    "avg_retrieval_diversity": 0.537,
+    "avg_retrieval_confidence": 0.4881,
+    "avg_coverage_score": 0.037,
+    "total_cases": 18
+  },
+  "modular_rag_metrics": {
+    "total_cases": 18,
+    "module_activation_distribution": {
+      "query_rewrite": 18,
+      "hybrid_retriever": 18,
+      "query_planner": 3,
+      "adaptive_router": 3,
+      "cross_encoder_reranker": 3,
+      "crag_corrector": 3,
+      "self_rag_critic": 3
+    },
+    "crag_trigger_rate": 0.0556,
+    "crag_status_distribution": {
+      "passed": 2,
+      "low_quality": 1
+    },
+    "self_rag_pass_rate": 0.0,
+    "self_rag_evaluated": 3,
+    "kg_hit_rate": 0.0,
+    "kg_hit_cases": 0
+  },
   "rows": {
     "rag": [
       {
@@ -32,10 +86,12 @@
           "POL-001"
         ],
         "returned_doc_ids": [
-          "POL-001"
+          "sop_after_sales_chunk_012",
+          "POL-001",
+          "sop_fresh_food_chunk_025"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "用户签收 3 天内想退货，没有质量问题，客服应该按什么基线处理？",
@@ -45,11 +101,12 @@
           "POL-001"
         ],
         "returned_doc_ids": [
+          "sop_after_sales_chunk_004",
           "POL-001",
-          "POL-003"
+          "sop_fresh_food_chunk_025"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "一线客服能不能对高风险用户口头承诺超额赔付？需要保留什么依据？",
@@ -60,10 +117,12 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-005"
+          "sop_fresh_food_chunk_025",
+          "POL-005",
+          "sop_fresh_food_chunk_022"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "物流延误超过 7 天并且包装破损，客服应该怎么安抚？",
@@ -73,10 +132,12 @@
           "POL-002"
         ],
         "returned_doc_ids": [
-          "POL-002"
+          "POL-002",
+          "sop_fresh_food_chunk_024",
+          "sop_after_sales_chunk_005"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "包裹晚到且外包装损坏，应该先补发还是先取证？",
@@ -86,10 +147,12 @@
           "POL-002"
         ],
         "returned_doc_ids": [
-          "POL-002"
+          "sop_fresh_food_chunk_029",
+          "POL-002",
+          "sop_fresh_food_chunk_024"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "高价值商品物流延误，客服能不能扩大赔付金额？",
@@ -100,10 +163,12 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-002"
+          "POL-002",
+          "sop_fresh_food_chunk_024",
+          "sop_fresh_food_chunk_029"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "3C 数码拆封后出现质量问题，应该怎么处理？",
@@ -113,10 +178,12 @@
           "POL-003"
         ],
         "returned_doc_ids": [
-          "POL-003"
+          "sop_after_sales_chunk_001",
+          "POL-003",
+          "sop_fresh_food_chunk_025"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "手机已拆封，用户说功能异常，客服应该收集哪些证据？",
@@ -126,10 +193,12 @@
           "POL-003"
         ],
         "returned_doc_ids": [
-          "POL-003"
+          "sop_fresh_food_chunk_022",
+          "POL-003",
+          "sop_logistics_chunk_036"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "耳机拆封后用户主观不满意，能不能直接套用无理由退货？",
@@ -140,11 +209,12 @@
           "POL-001"
         ],
         "returned_doc_ids": [
+          "sop_after_sales_chunk_005",
           "POL-001",
-          "POL-003"
+          "POL-002"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "生鲜坏了并且冷链超时，运费和货款怎么赔？",
@@ -155,10 +225,11 @@
         ],
         "returned_doc_ids": [
           "POL-004",
-          "POL-002"
+          "sop_after_sales_chunk_012",
+          "sop_fresh_food_chunk_025"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "水果签收后发现腐烂，用户提供照片时应该走补发还是退款？",
@@ -168,11 +239,12 @@
           "POL-004"
         ],
         "returned_doc_ids": [
-          "POL-001",
-          "POL-004"
+          "POL-004",
+          "sop_fresh_food_chunk_025",
+          "POL-001"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "生鲜重复索赔账户又说冷链超时，应该直接赔付吗？",
@@ -183,10 +255,12 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-004"
+          "POL-004",
+          "sop_fresh_food_chunk_025",
+          "sop_fresh_food_chunk_035"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "高风险用户要求超额赔付，客服能不能直接承诺？",
@@ -196,10 +270,12 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-005"
+          "sop_logistics_chunk_046",
+          "POL-005",
+          "sop_fresh_food_chunk_029"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "风险分很高的账户多次重复索赔，应该保留什么记录并走谁复核？",
@@ -209,10 +285,12 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-005"
+          "sop_fresh_food_chunk_025",
+          "POL-005",
+          "sop_complaint_escalation_chunk_013"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "主管复核前，客服可以先给高风险账户全额赔付承诺吗？",
@@ -222,37 +300,51 @@
           "POL-005"
         ],
         "returned_doc_ids": [
-          "POL-005"
+          "sop_after_sales_chunk_001",
+          "POL-005",
+          "sop_fresh_food_chunk_035"
         ],
         "hit": true,
-        "retrieval_mode": "lexical_eval"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "公司年会报销流程怎么走？",
         "tag": "no_answer",
         "expected_doc_id": null,
         "acceptable_doc_ids": [],
-        "returned_doc_ids": [],
+        "returned_doc_ids": [
+          "sop_fresh_food_chunk_024",
+          "sop_logistics_chunk_046",
+          "sop_fresh_food_chunk_029"
+        ],
         "hit": true,
-        "retrieval_mode": "none"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "仓库员工排班系统如何修改班次？",
         "tag": "no_answer",
         "expected_doc_id": null,
         "acceptable_doc_ids": [],
-        "returned_doc_ids": [],
+        "returned_doc_ids": [
+          "sop_after_sales_chunk_004",
+          "sop_fresh_food_chunk_022",
+          "sop_fresh_food_chunk_025"
+        ],
         "hit": true,
-        "retrieval_mode": "none"
+        "retrieval_mode": "vector_search"
       },
       {
         "question": "办公室 WiFi 密码忘记了怎么重置？",
         "tag": "no_answer",
         "expected_doc_id": null,
         "acceptable_doc_ids": [],
-        "returned_doc_ids": [],
+        "returned_doc_ids": [
+          "sop_fresh_food_chunk_025",
+          "sop_after_sales_chunk_001",
+          "sop_complaint_escalation_chunk_013"
+        ],
         "hit": true,
-        "retrieval_mode": "none"
+        "retrieval_mode": "vector_search"
       }
     ],
     "route": [
@@ -530,6 +622,89 @@
         "tag": "order_followup_logistics",
         "expected_tool": "query_logistics_status",
         "actual_tool": "query_logistics_status",
+        "hit": true
+      },
+      {
+        "messages": [
+          "3C 数码拆封后出现质量问题，应该怎么处理？",
+          "那退款资格呢？"
+        ],
+        "tag": "rag_followup",
+        "expected_tool": "search_policy_docs",
+        "actual_tool": "query_refund_cases",
+        "hit": false
+      },
+      {
+        "messages": [
+          "生鲜坏损赔付政策是什么？",
+          "那物流延误的情况呢？"
+        ],
+        "tag": "rag_followup_cross_category",
+        "expected_tool": "search_policy_docs",
+        "actual_tool": "query_refund_cases",
+        "hit": false
+      }
+    ],
+    "multi_agent": [
+      {
+        "question": "查一下质量问题退款超过100元的明细，按 SOP 依据是否应该人工复核，顺便看看这些用户的风险分",
+        "tag": "full_multi_agent",
+        "expected_agents": [
+          "data",
+          "policy",
+          "risk"
+        ],
+        "actual_agents": [
+          "data",
+          "policy",
+          "risk"
+        ],
+        "hit": true
+      },
+      {
+        "question": "统计物流延误的赔付明细，并按规则判断是否需要升级",
+        "tag": "data_plus_policy",
+        "expected_agents": [
+          "data",
+          "policy"
+        ],
+        "actual_agents": [
+          "data",
+          "policy"
+        ],
+        "hit": true
+      },
+      {
+        "question": "用户 9ef432eb6251297304e76186b10a928d 的风险分是多少，按政策应该怎么处理",
+        "tag": "risk_plus_policy",
+        "expected_agents": [
+          "risk",
+          "policy"
+        ],
+        "actual_agents": [
+          "policy",
+          "risk"
+        ],
+        "hit": true
+      }
+    ],
+    "query_planner": [
+      {
+        "question": "查一下质量问题退款超过100元的明细，并且告诉我按 SOP 怎么处理",
+        "tag": "dual_intent",
+        "expected_complex": true,
+        "actual_complex": true,
+        "decomposition_method": "llm",
+        "steps": 2,
+        "hit": true
+      },
+      {
+        "question": "查询订单 53cdb2fc8bc7dce0b6741e2150273451 的物流状态",
+        "tag": "simple_query",
+        "expected_complex": false,
+        "actual_complex": false,
+        "decomposition_method": "passthrough",
+        "steps": 0,
         "hit": true
       }
     ]

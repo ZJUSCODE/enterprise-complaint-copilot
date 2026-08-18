@@ -1,4 +1,4 @@
-export type ChatMode = 'function_call_agent' | 'sql_rag_chain' | 'langchain_rag' | 'router_demo' | 'auto';
+export type ChatMode = 'function_call_agent' | 'sql_rag_chain' | 'langchain_rag' | 'router_demo' | 'auto' | 'multi_agent' | 'modular_rag';
 export type Role = 'viewer' | 'analyst' | 'supervisor';
 export type ReviewStatus = 'pending' | 'resolved' | 'rejected';
 export type ResponseLanguage = 'auto' | 'zh' | 'en';
@@ -46,11 +46,8 @@ export interface OverviewResponse {
   top_keywords: KeywordItem[];
   complaint_mix: CountItem[];
   latest_snapshot: string;
-  trend_window_start?: string | null;
-  trend_window_end?: string | null;
   api_configured: boolean;
   langchain_rag_enabled: boolean;
-  rag_retrieval_mode?: 'vector' | 'lexical';
   llm_model: string;
   rag_status: string;
   data_query_backend: string;
@@ -168,7 +165,15 @@ export interface Citation {
   text: string;
   retrieval_score?: number;
   rerank_score?: number;
+  rrf_score?: number;
   source?: string;
+}
+
+export interface CitationHighlight {
+  citation_index: number;
+  citation_label: string;
+  answer_excerpt: string;
+  match_score: number;
 }
 
 export interface ToolTraceItem {
@@ -176,6 +181,7 @@ export interface ToolTraceItem {
   arguments?: Record<string, unknown>;
   duration_ms?: number;
   result_summary?: string;
+  structured_output?: Record<string, unknown>;
   token_usage?: TokenUsage;
   cost_breakdown?: CostBreakdown;
   timing?: Record<string, number>;
@@ -214,6 +220,55 @@ export interface ReviewCase {
   updated_at?: string;
 }
 
+export interface QueryRewriteInfo {
+  original: string;
+  rewritten: string;
+  method: string;
+  rewrite_ms: number;
+}
+
+export interface ReflectionResult {
+  passed: boolean;
+  issues: string[];
+  retries: number;
+}
+
+export interface QueryPlanStep {
+  step_id: number;
+  query: string;
+  expected_tool: string;
+  depends_on?: number[];
+}
+
+export interface QueryPlanInfo {
+  steps: QueryPlanStep[];
+  decomposition_method: string;
+}
+
+export interface AgentDispatch {
+  agent: string;
+  called: boolean;
+}
+
+export interface OnlineRAGMetricsInfo {
+  retrieval_diversity: number;
+  retrieval_confidence: number;
+  coverage_score: number;
+  has_citations: boolean;
+  query_rewrite_applied: boolean;
+}
+
+export interface ModularRAGMetricsInfo {
+  activated_modules: string[];
+  skipped_modules: string[];
+  module_timings: Record<string, number>;
+  retrieval_strategy: string;
+  kg_entities: string[];
+  kg_triples: number;
+  crag_status: string;
+  self_rag_passed: boolean;
+}
+
 export interface ChatResponse {
   mode: string;
   title: string;
@@ -224,6 +279,7 @@ export interface ChatResponse {
   sql_preview?: string;
   highlights?: string[];
   citations?: Citation[];
+  citation_highlights?: CitationHighlight[];
   tool_trace?: ToolTraceItem[];
   review_required?: boolean;
   review_reason?: string;
@@ -247,11 +303,13 @@ export interface ChatResponse {
   };
   graph_trace?: string[];
   graph_engine?: string;
-  model_trace?: Array<{
-    stage: string;
-    model: string;
-    provider?: string;
-  }>;
+  agent_dispatch?: AgentDispatch[];
+  query_rewrite?: QueryRewriteInfo;
+  reflection?: ReflectionResult;
+  query_plan?: QueryPlanInfo;
+  retrieval_mode?: string;
+  online_rag_metrics?: OnlineRAGMetricsInfo;
+  modular_rag_metrics?: ModularRAGMetricsInfo;
 }
 
 export interface ChatRequest {
@@ -260,6 +318,14 @@ export interface ChatRequest {
   session_id?: string | null;
   role?: Role;
   response_language?: ResponseLanguage;
+}
+
+export interface FeedbackRequest {
+  request_id: string;
+  session_id?: string | null;
+  rating: 'up' | 'down';
+  comment?: string;
+  role?: Role;
 }
 
 export interface StreamStatusPayload {
@@ -383,4 +449,95 @@ export interface EvalReport {
     memory: EvalMemoryRow[];
   };
   error?: ApiErrorPayload;
+}
+
+// ── Document Management ──────────────────────────────────────────────
+
+export interface DocumentInfo {
+  filename: string;
+  size_bytes: number;
+  modified_at: string;
+  extension: string;
+}
+
+export interface DocumentUploadResponse {
+  filename: string;
+  sections_parsed: number;
+  sections_after_cleaning: number;
+  chunks_created: number;
+  error?: ApiErrorPayload;
+}
+
+export interface DocumentListResponse {
+  items: DocumentInfo[];
+  total: number;
+}
+
+export interface LineageStep {
+  step_name: string;
+  timestamp: string;
+  duration_ms: number;
+}
+
+export interface LineageRecord {
+  chunk_id: string;
+  source_file: string;
+  source_page: number | null;
+  source_section: string;
+  processing_steps: LineageStep[];
+  created_at: string;
+}
+
+export interface DocumentLineageResponse {
+  filename: string;
+  chunks: number;
+  lineages: LineageRecord[];
+}
+
+export interface VersionRecord {
+  version_id: string;
+  branch: string;
+  parent_id: string | null;
+  timestamp: string;
+  message: string;
+  author: string;
+  chunk_count: number;
+  added: number;
+  removed: number;
+  modified: number;
+}
+
+export interface VersionListResponse {
+  items: VersionRecord[];
+}
+
+export interface VersionCreateResponse {
+  version: {
+    version_id: string;
+    chunk_count: number;
+    timestamp: string;
+  };
+}
+
+export interface DocumentAuditEvent {
+  event_id: string;
+  timestamp: string;
+  category: string;
+  action: string;
+  actor: string;
+  target: string;
+  details: Record<string, unknown>;
+  result: string;
+}
+
+export interface DocumentAuditResponse {
+  items: DocumentAuditEvent[];
+}
+
+export interface DocumentAuditStats {
+  total_events: number;
+  by_category: Record<string, number>;
+  by_result: Record<string, number>;
+  recent_24h: number;
+  retention_days: number;
 }

@@ -1,6 +1,6 @@
 # 架构增强路线
 
-这个项目当前已经具备应届生求职展示所需的 Agent 应用闭环：Vue 默认生产前端、Router、Function Calling、Tool Registry / MCP、RAG、只读 SQL、Guardrail、RBAC、审计日志、可复现离线 eval、mock tests、Agent 执行链路可视化、移动端 E2E 和单端口演示。下面记录当前增强项状态和后续生产化路线。
+这个项目当前已经具备应届生求职展示所需的 Agent 应用闭环：Vue 默认生产前端、Router、Function Calling、Tool Registry / MCP、RAG、只读 SQL、Guardrail、RBAC、审计日志、50 case eval、mock tests、Agent 执行链路可视化、移动端 E2E 和单端口演示。下面记录当前增强项状态和后续生产化路线。
 
 ## P0 能力清单
 

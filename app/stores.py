@@ -209,19 +209,26 @@ class TaskQueueStore:
 class SessionMemoryStore:
     def __init__(self, redis_runtime: RedisRuntime | None = None, ttl_seconds: int = 86400):
         self.sessions: dict[str, list[dict[str, str]]] = {}
+        self.session_meta: dict[str, dict[str, Any]] = {}
         self.redis = redis_runtime
         self.ttl_seconds = ttl_seconds
 
     def _key(self, session_id: str) -> str:
         return f"session:{session_id}:messages"
 
+    def _meta_key(self, session_id: str) -> str:
+        return f"session:{session_id}:meta"
+
     def get_or_create(self, session_id: str | None = None) -> str:
         sid = session_id or str(uuid.uuid4())
         if self.redis and self.redis.available:
             if self.redis.get_json(self._key(sid)) is None:
                 self.redis.set_json(self._key(sid), [], self.ttl_seconds)
+            if self.redis.get_json(self._meta_key(sid)) is None:
+                self.redis.set_json(self._meta_key(sid), {}, self.ttl_seconds)
         else:
             self.sessions.setdefault(sid, [])
+            self.session_meta.setdefault(sid, {})
         return sid
 
     def recent_messages(self, session_id: str, limit: int = 6) -> list[dict[str, str]]:
@@ -237,3 +244,17 @@ class SessionMemoryStore:
             return
         self.sessions.setdefault(session_id, []).append({"role": role, "content": content})
         self.sessions[session_id] = self.sessions[session_id][-12:]
+
+    def set_meta(self, session_id: str, key: str, value: Any) -> None:
+        if self.redis and self.redis.available:
+            meta = self.redis.get_json(self._meta_key(session_id)) or {}
+            meta[key] = value
+            self.redis.set_json(self._meta_key(session_id), meta, self.ttl_seconds)
+            return
+        self.session_meta.setdefault(session_id, {})[key] = value
+
+    def get_meta(self, session_id: str, key: str, default: Any = None) -> Any:
+        if self.redis and self.redis.available:
+            meta = self.redis.get_json(self._meta_key(session_id)) or {}
+            return meta.get(key, default)
+        return self.session_meta.get(session_id, {}).get(key, default)

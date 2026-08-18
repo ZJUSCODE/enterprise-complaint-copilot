@@ -18,8 +18,17 @@
       </article>
     </div>
 
+    <div v-if="message.agent_dispatch?.length" class="agent-dispatch">
+      <p class="dispatch-title">智能体调度</p>
+      <div v-for="d in message.agent_dispatch" :key="d.agent" class="dispatch-chip" :class="{ called: d.called }">
+        {{ agentLabel(d.agent) }}
+      </div>
+    </div>
+
     <div class="flow-meta">
       <span v-if="message.latency_ms !== undefined">{{ Math.round(message.latency_ms) }} ms</span>
+      <span v-if="message.retry_count !== undefined">retry {{ message.retry_count }}</span>
+      <span v-if="message.estimated_cost_usd !== undefined">${{ Number(message.estimated_cost_usd).toFixed(6) }}</span>
     </div>
   </section>
 </template>
@@ -100,4 +109,40 @@ function shortId(value?: string | null) {
   if (!value) return '-';
   return value.length > 10 ? `${value.slice(0, 8)}...` : value;
 }
+
+const AGENT_LABELS: Record<string, string> = {
+  data: '数据 Agent',
+  policy: '政策 Agent',
+  risk: '风险 Agent',
+};
+
+function agentLabel(agent: string) {
+  return AGENT_LABELS[agent] || agent;
+}
 </script>
+
+<style scoped>
+.agent-dispatch {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.dispatch-title {
+  font-size: 12px;
+  color: #666;
+  margin: 0;
+}
+.dispatch-chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: #f0f0f0;
+  color: #999;
+}
+.dispatch-chip.called {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+</style>

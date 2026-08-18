@@ -13,17 +13,19 @@
           </div>
           <span v-if="message.payload.latency_ms">{{ Math.round(message.payload.latency_ms) }} ms</span>
         </div>
-        <p
-          class="answer-summary"
-          v-html="highlightText(cleanText(message.payload.summary, Boolean(message.payload.table?.length)))"
-        ></p>
+        <p class="answer-summary" v-html="highlightText(cleanText(message.payload.summary))"></p>
 
         <div v-if="message.payload.metrics?.length" class="metric-strip">
           <div v-for="metric in message.payload.metrics" :key="metric.label" class="mini-metric">
             <span>{{ metric.label }}</span>
-            <strong>{{ displayMetric(metric.label, metric.value) }}</strong>
+            <strong>{{ metric.value }}</strong>
           </div>
         </div>
+
+        <MetricsPieChart
+          v-if="(message.payload.metrics?.length ?? 0) >= 2"
+          :metrics="message.payload.metrics || []"
+        />
 
         <ul v-if="message.payload.highlights?.length" class="highlight-list">
           <li v-for="item in message.payload.highlights.slice(0, 4)" :key="item" v-html="highlightText(cleanText(item))"></li>
@@ -38,17 +40,12 @@
           </el-table-column>
         </el-table>
 
-        <div v-if="message.payload.table?.length || message.payload.sql_preview" class="table-actions">
-          <button
-            v-if="message.payload.table?.length"
-            type="button"
-            class="text-link"
-            @click="exportTableCsv(message.payload.table, message.payload.request_id)"
-          >
+        <div v-if="message.payload.table?.length" class="table-actions">
+          <button type="button" class="text-link" @click="exportTableCsv(message.payload.table, message.payload.request_id)">
             导出数据
           </button>
           <button v-if="message.payload.sql_preview" type="button" class="text-link" @click="emit('show-sql')">
-            查看底层 SQL
+            查看底层 SQL 代码
           </button>
         </div>
 
@@ -56,15 +53,38 @@
           request_id: {{ message.payload.request_id }}
         </div>
 
+        <div v-if="message.payload.request_id" class="feedback-bar">
+          <template v-if="!feedbackState[message.payload.request_id]">
+            <button type="button" class="fb-btn" title="有帮助" @click="sendFeedback(message.payload.request_id!, 'up', message.payload?.session_id)">👍</button>
+            <button type="button" class="fb-btn" title="没帮助" @click="sendFeedback(message.payload.request_id!, 'down', message.payload?.session_id)">👎</button>
+          </template>
+          <span v-else class="fb-done">{{ feedbackState[message.payload.request_id] === 'up' ? '已点赞' : '已反馈' }}</span>
+        </div>
+
+        <div v-if="message.payload.token_usage || message.payload.estimated_cost_usd !== undefined" class="runtime-meta">
+          <span v-if="message.payload.token_usage">{{ tokenLine(message.payload.token_usage) }}</span>
+          <span v-if="message.payload.cost_breakdown">
+            embedding {{ formatCost(message.payload.cost_breakdown.embedding_cost_usd) }}
+            · prompt {{ formatCost(message.payload.cost_breakdown.prompt_cost_usd) }}
+            · completion {{ formatCost(message.payload.cost_breakdown.completion_cost_usd) }}
+          </span>
+          <span v-else-if="message.payload.estimated_cost_usd !== undefined">
+            cost {{ formatCost(message.payload.estimated_cost_usd) }}
+          </span>
+          <span v-if="message.payload.retry_count !== undefined">retry {{ message.payload.retry_count }}</span>
+        </div>
       </template>
     </div>
   </article>
 </template>
 
 <script setup lang="ts">
+import { reactive } from 'vue';
 import type { ChatMessageState } from '@/stores/chat';
-import type { TicketRow } from '@/types/api';
+import type { TokenUsage } from '@/types/api';
 import { formatMoney, workflowLabel } from '@/utils/format';
+import { postFeedback } from '@/api/client';
+import MetricsPieChart from '@/components/MetricsPieChart.vue';
 
 defineProps<{
   message: ChatMessageState;
@@ -72,11 +92,31 @@ defineProps<{
 
 const emit = defineEmits<{ (e: 'show-sql'): void }>();
 
-function displayMetric(label: string, value: string | number) {
-  if (typeof value !== 'number') return value;
-  if (label.includes('金额') || label.includes('赔付') || label.includes('实付')) return formatMoney(value);
-  if (label.includes('工单') || label.includes('订单') || label.includes('触发')) return `${value} 单`;
-  return value;
+const feedbackState = reactive<Record<string, 'up' | 'down'>>({});
+
+async function sendFeedback(requestId: string, rating: 'up' | 'down', sessionId?: string | null) {
+  feedbackState[requestId] = rating;
+  try {
+    await postFeedback(requestId, rating, undefined, sessionId || undefined);
+  } catch {
+    // feedback is best-effort
+  }
+}
+
+function tokenLine(usage: TokenUsage) {
+  const parts = [
+    `total ${usage.total_tokens}`,
+    `prompt ${usage.prompt_tokens}`,
+    `completion ${usage.completion_tokens}`,
+  ];
+  if (usage.embedding_tokens !== undefined) {
+    parts.splice(1, 0, `embedding ${usage.embedding_tokens}`);
+  }
+  return `tokens ${parts.join(' / ')}`;
+}
+
+function formatCost(value?: number) {
+  return `$${Number(value || 0).toFixed(6)}`;
 }
 
 function escapeHtml(value: string): string {
@@ -88,22 +128,11 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function cleanText(value?: string, stripMarkdownTables = false) {
-  const lines = String(value || '').split('\n');
-  const normalized = (stripMarkdownTables
-    ? lines.filter((line) => {
-        const trimmed = line.trim();
-        return !(trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.split('|').length >= 4);
-      })
-    : lines
-  ).join('\n');
-
-  return escapeHtml(normalized)
+function cleanText(value?: string) {
+  return escapeHtml(String(value || ''))
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
-    .replace(/^\s*#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*]\s+/gm, '• ')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s*[-*]\s+/gm, '')
     .trim();
 }
 
@@ -116,9 +145,9 @@ function highlightText(input: string): string {
   return result;
 }
 
-function exportTableCsv(table: TicketRow[], requestId?: string) {
+function exportTableCsv<T extends object>(table: T[], requestId?: string) {
   if (!table.length) return;
-  const headers = Object.keys(table[0]) as Array<keyof TicketRow>;
+  const headers = Object.keys(table[0]) as Array<keyof T>;
   const csvRows = [headers.join(',')];
   for (const row of table) {
     csvRows.push(headers.map((h) => String(row[h] ?? '')).join(','));
@@ -156,5 +185,26 @@ function exportTableCsv(table: TicketRow[], requestId?: string) {
 }
 .table-actions .text-link:hover {
   color: var(--el-color-primary-light-3);
+}
+.feedback-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fb-btn {
+  background: none;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 10px;
+  transition: border-color 0.2s;
+}
+.fb-btn:hover {
+  border-color: var(--el-color-primary);
+}
+.fb-done {
+  font-size: 12px;
+  color: #999;
 }
 </style>

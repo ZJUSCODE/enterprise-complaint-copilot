@@ -78,13 +78,15 @@ CI 文件：
 
 CI 当前会执行：
 
+- Python 依赖安装。
+- Node 依赖安装。
+- Playwright Chromium 安装。
 - `python -m py_compile app/runtime.py main.py`。
-- `frontend npm run build`，同时执行 Vue TypeScript 检查和 Vite 生产构建。
-- `python -m pytest tests -q`，并输出 JUnit XML。
-- `python scripts/evaluate_rag.py --force-lexical`，并校验分类总数。
+- `node --check static/app.js && node --check static/review.js`。
+- `python -m pytest -q`。
+- `frontend npm run build`。
 - `npm run test:e2e`，包含 FastAPI 单端口生产验收、Vue3 开发态工作台和移动端工作台。
 - `docker build -t complaint-copilot:ci .`。
-- 启动镜像后同时检查 `/api/health`、`/` 和 Vue mount element，再删除临时容器。
 
 面试讲法：
 

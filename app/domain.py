@@ -34,11 +34,7 @@ COMPLAINT_PATTERNS = {
     "仅退款": ["refund", "reembolso", "devol", "cancel", "troca", "退款"],
 }
 
-MUTATION_PATTERNS = [
-    "update", "delete", "insert", "drop", "truncate", "删除", "清空", "审批", "批了",
-    "通过退款", "改订单", "直接退款", "退款额度调到", "调整退款额度", "修改退款额度",
-    "工单的优先级设为", "工单优先级设为", "设置工单优先级", "调整工单优先级",
-]
+MUTATION_PATTERNS = ["update", "delete", "insert", "drop", "truncate", "删除", "清空", "审批", "批了", "通过退款", "改订单", "直接退款"]
 PROMPT_INJECTION_PATTERNS = [
     "忽略规则",
     "忽略上面的规则",
@@ -61,6 +57,30 @@ DATA_EXFILTRATION_PATTERNS = [
     "export all users",
     "所有 user_id",
     "全部 user_id",
+]
+SOCIAL_ENGINEERING_PATTERNS = [
+    "我是系统管理员",
+    "我是管理员",
+    "我是超级用户",
+    "我是 CEO",
+    "我是老板",
+    "我有最高权限",
+    "管理员身份",
+    "作为系统管理员",
+    "作为管理员",
+    "as system admin",
+    "as administrator",
+    "i am the admin",
+    "紧急需求",
+    "紧急处理",
+    "马上处理",
+    "立刻执行",
+    "urgent",
+    "asap",
+    "immediately",
+    "right now",
+    "override",
+    "bypass",
 ]
 QUERY_PATTERNS = ["查询", "查一下", "明细", "退款", "赔付", "订单", "统计", "分析", "风险", "用户"]
 POLICY_PATTERNS = ["政策", "规则", "SOP", "怎么赔", "能不能退", "如何处理", "依据", "条款", "规范", "怎么处理", "应该怎么", "how to", "should we", "policy"]

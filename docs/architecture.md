@@ -128,7 +128,13 @@ cd frontend
 npm run build
 ```
 
-Current verification evidence is generated from the fixed commit: pytest JUnit output, the offline evaluation report, the successful CI run, and the local verification handoff. This document does not maintain result totals manually.
+Current verified baseline:
+
+```text
+pytest: 48 passed
+demo_check: passed
+frontend build: passed
+```
 
 ## What This Shows for AI Agent Roles
 

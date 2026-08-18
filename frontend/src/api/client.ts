@@ -3,6 +3,11 @@ import type {
   ChatResponse,
   AuditRecentResponse,
   DailyRiskReport,
+  DocumentAuditResponse,
+  DocumentAuditStats,
+  DocumentLineageResponse,
+  DocumentListResponse,
+  DocumentUploadResponse,
   EvalReport,
   LoginResponse,
   OverviewResponse,
@@ -12,6 +17,8 @@ import type {
   SampleQuestion,
   SchemaCatalog,
   StreamStatusPayload,
+  VersionCreateResponse,
+  VersionListResponse,
 } from '@/types/api';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -88,6 +95,7 @@ export async function streamChat(
   request: ChatRequest,
   handlers: {
     onStatus?: (payload: StreamStatusPayload) => void;
+    onToken?: (content: string) => void;
     onFinal?: (payload: ChatResponse) => void;
   } = {},
 ) {
@@ -115,6 +123,12 @@ export async function streamChat(
       .join('\n');
 
     if (!eventName || !dataText) return;
+
+    if (eventName === 'token') {
+      const data = JSON.parse(dataText) as { content?: string };
+      if (data.content) handlers.onToken?.(data.content);
+      return;
+    }
 
     const data = JSON.parse(dataText) as StreamStatusPayload | ChatResponse;
     if (eventName === 'status') {
@@ -166,4 +180,70 @@ export function updateReviewCase(caseId: string, status: ReviewStatus, reviewerN
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, reviewer_note: reviewerNote, role: 'supervisor', assignee, case_priority: casePriority }),
   });
+}
+
+export function postFeedback(requestId: string, rating: 'up' | 'down', comment?: string, sessionId?: string) {
+  return fetchJson<{ item: Record<string, unknown> }>('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, rating, comment, session_id: sessionId }),
+  });
+}
+
+// ── Document Management ──────────────────────────────────────────────
+
+export function listDocuments() {
+  return fetchJson<DocumentListResponse>('/api/documents');
+}
+
+export async function uploadDocument(file: File): Promise<DocumentUploadResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch(apiUrl('/api/documents'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await errorMessage(response));
+  }
+  return response.json();
+}
+
+export function deleteDocument(filename: string) {
+  return fetchJson<{ deleted: string }>(`/api/documents/${encodeURIComponent(filename)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getDocumentLineage(filename: string) {
+  return fetchJson<DocumentLineageResponse>(`/api/documents/${encodeURIComponent(filename)}/lineage`);
+}
+
+export function listVersions(branch?: string) {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  return fetchJson<VersionListResponse>(`/api/versions${params}`);
+}
+
+export function createVersion() {
+  return fetchJson<VersionCreateResponse>('/api/versions', { method: 'POST' });
+}
+
+export function rollbackVersion(versionId: string) {
+  return fetchJson<{ restored: string; chunks: number }>(`/api/versions/${encodeURIComponent(versionId)}/rollback`, {
+    method: 'POST',
+  });
+}
+
+export function getDocumentAudit(params?: { category?: string; action?: string; limit?: number }) {
+  const searchParams = new URLSearchParams();
+  if (params?.category) searchParams.set('category', params.category);
+  if (params?.action) searchParams.set('action', params.action);
+  if (params?.limit) searchParams.set('limit', String(params.limit));
+  const qs = searchParams.toString();
+  return fetchJson<DocumentAuditResponse>(`/api/document-audit${qs ? '?' + qs : ''}`);
+}
+
+export function getDocumentAuditStats() {
+  return fetchJson<DocumentAuditStats>('/api/document-audit/stats');
 }

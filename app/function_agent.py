@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Generator
 
 from openai import OpenAI
 from pydantic import ValidationError
@@ -16,6 +16,7 @@ from app.domain import (
     POLICY_PATTERNS,
     PROMPT_INJECTION_PATTERNS,
     QUERY_PATTERNS,
+    SOCIAL_ENGINEERING_PATTERNS,
     contains_any,
     detect_amount_threshold,
     detect_category_from_query,
@@ -31,6 +32,7 @@ from app.schemas import (
     QueryRefundArgs,
     QueryRefundEligibilityArgs,
     SearchPolicyArgs,
+    TOOL_RESULT_MODELS,
 )
 from app.stores import SessionMemoryStore
 from app.ticket_store import QueryFilters, ReadOnlySQLiteStore
@@ -45,37 +47,14 @@ from app.utils import (
 
 
 class FunctionCallingAgent:
-    def __init__(self, settings: Settings, analytics: LocalAnalyticsEngine, sql_store: ReadOnlySQLiteStore, knowledge_base: PolicyKnowledgeBase, memory: SessionMemoryStore):
+    def __init__(self, settings: Settings, analytics: LocalAnalyticsEngine, sql_store: ReadOnlySQLiteStore, knowledge_base: PolicyKnowledgeBase, memory: SessionMemoryStore, langchain_rag: Any | None = None):
         self.settings = settings
         self.analytics = analytics
         self.sql_store = sql_store
         self.knowledge_base = knowledge_base
         self.memory = memory
+        self.langchain_rag = langchain_rag
         self.client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url) if settings.llm_api_key else None
-
-    @staticmethod
-    def _unsupported_query_reason(message: str) -> str | None:
-        if contains_any(message.lower(), ["最多", "最少", "top", "排名", "排行", "占比", "分组", "趋势"]):
-            return "当前 Text-to-SQL 只支持异常工单明细及金额汇总，不支持 Top、排名、占比、分组或趋势查询。"
-        return None
-
-    def _unsupported_query_response(self, message: str, session_id: str | None = None) -> dict[str, Any] | None:
-        reason = self._unsupported_query_reason(message)
-        if not reason:
-            return None
-        sid = self.memory.get_or_create(session_id)
-        summary = f"无法按原问题执行：{reason} 请改问具体类目、客诉类型或赔付金额阈值。"
-        self.memory.append(sid, "user", message)
-        self.memory.append(sid, "assistant", summary)
-        return {
-            "mode": "function_call_agent",
-            "title": "查询能力边界",
-            "summary": summary,
-            "session_id": sid,
-            "highlights": ["未生成近似 SQL，也未丢弃原问题中的分组条件。"],
-            "tool_trace": [],
-            "error": {"code": "unsupported_query_shape", "message": reason},
-        }
 
     def _guardrail(self, message: str) -> dict[str, Any] | None:
         trigger: str | None = None
@@ -85,6 +64,8 @@ class FunctionCallingAgent:
             trigger = "Prompt Injection / 规则绕过意图"
         elif contains_any(message, DATA_EXFILTRATION_PATTERNS):
             trigger = "越权导出或全量数据请求"
+        elif contains_any(message, SOCIAL_ENGINEERING_PATTERNS):
+            trigger = "社会工程学攻击（身份冒充或紧急施压）"
         if trigger:
             return {
                 "mode": "guardrail",
@@ -109,17 +90,14 @@ class FunctionCallingAgent:
             {"type": "function", "function": {"name": "query_policy_by_market", "description": "Lookup market-specific refund or complaint policy guidance.", "parameters": {"type": "object", "properties": {"market": {"type": "string"}, "topic": {"type": "string"}}, "required": ["market", "topic"]}}},
         ]
 
-    def _validate_tool_args(self, name: str, arguments: dict[str, Any], original_query: str | None = None) -> dict[str, Any]:
+    def _validate_tool_args(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name == "get_user_risk":
             return GetUserRiskArgs(**arguments).model_dump()
         if name == "query_refund_cases":
             payload = QueryRefundArgs(**arguments).model_dump()
-            source_query = original_query or payload["query"]
-            payload["query"] = source_query
-            payload["category"] = detect_category_from_query(source_query) or normalize_category(payload.get("category"))
-            payload["complaint_type"] = detect_complaint_type(source_query) or payload.get("complaint_type")
-            detected_threshold = detect_amount_threshold(source_query)
-            payload["amount_threshold"] = detected_threshold if detected_threshold is not None else payload.get("amount_threshold")
+            payload["category"] = normalize_category(payload.get("category")) or detect_category_from_query(payload["query"])
+            payload["complaint_type"] = payload.get("complaint_type") or detect_complaint_type(payload["query"])
+            payload["amount_threshold"] = payload.get("amount_threshold") or detect_amount_threshold(payload["query"])
             return payload
         if name == "search_policy_docs":
             payload = SearchPolicyArgs(**arguments).model_dump()
@@ -135,6 +113,16 @@ class FunctionCallingAgent:
             return QueryPolicyByMarketArgs(**arguments).model_dump()
         raise ValueError(f"未知工具：{name}")
 
+    def _validate_tool_result(self, name: str, result: dict[str, Any]) -> dict[str, Any] | None:
+        model_cls = TOOL_RESULT_MODELS.get(name)
+        if not model_cls:
+            return None
+        try:
+            validated = model_cls(**result)
+            return validated.model_dump()
+        except Exception:
+            return None
+
     def _execute_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if name == "get_user_risk":
             return self.analytics.get_user_risk(arguments["user_id"])
@@ -142,7 +130,11 @@ class FunctionCallingAgent:
             return self.sql_store.query_ticket_details(QueryFilters(category=arguments.get("category"), complaint_type=arguments.get("complaint_type"), amount_threshold=arguments.get("amount_threshold")))
         if name == "search_policy_docs":
             query = arguments.get("query", "")
-            docs = self.knowledge_base.lexical_search(query, category=arguments.get("category") or detect_category_from_query(query), top_k=3)
+            cat = arguments.get("category") or detect_category_from_query(query)
+            if self.langchain_rag and self.langchain_rag.available:
+                rag_result = self.langchain_rag.query(query, category=cat, top_k=3)
+                return {"documents": rag_result.get("sources", [])}
+            docs = self.knowledge_base.lexical_search(query, category=cat, top_k=3)
             return {"documents": docs}
         if name == "query_order_status":
             return self.analytics.query_order_status(arguments["order_id"])
@@ -153,60 +145,6 @@ class FunctionCallingAgent:
         if name == "query_policy_by_market":
             return self.analytics.query_policy_by_market(arguments["market"], arguments["topic"])
         return {"error": f"未知工具：{name}"}
-
-    def plan_refund_query(self, user_message: str) -> dict[str, Any]:
-        """Map natural language into a validated read-only SQL query plan."""
-        fallback_args = self._validate_tool_args("query_refund_cases", {"query": user_message})
-        unsupported_reason = self._unsupported_query_reason(user_message)
-        if unsupported_reason:
-            return {
-                "arguments": fallback_args,
-                "unsupported_reason": unsupported_reason,
-                "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                "model_trace": [],
-                "fallback_reason": "unsupported_query_shape",
-            }
-        if not self.client:
-            return {
-                "arguments": fallback_args,
-                "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                "model_trace": [],
-                "fallback_reason": "llm_not_configured",
-            }
-
-        retries = 0
-        while True:
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.settings.llm_model,
-                    temperature=0,
-                    messages=[
-                        {"role": "system", "content": "把用户问题转换为只读客诉数据查询参数。必须调用 query_refund_cases，不得生成或执行写入语句。"},
-                        {"role": "user", "content": user_message},
-                    ],
-                    tools=[self._build_tools()[1]],
-                    tool_choice={"type": "function", "function": {"name": "query_refund_cases"}},
-                )
-                tool_calls = response.choices[0].message.tool_calls or []
-                if not tool_calls:
-                    raise ValueError("model did not return query_refund_cases tool arguments")
-                arguments = safe_json_loads(tool_calls[0].function.arguments or "{}")
-                return {
-                    "arguments": self._validate_tool_args("query_refund_cases", arguments, original_query=user_message),
-                    "token_usage": extract_usage(response),
-                    "model_trace": [{"stage": "text_to_sql_planning", "model": self.settings.llm_model, "provider": "openai_compatible"}],
-                    "fallback_reason": None,
-                }
-            except Exception as exc:
-                retries += 1
-                if retries > self.settings.llm_max_retries:
-                    return {
-                        "arguments": fallback_args,
-                        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-                        "model_trace": [],
-                        "fallback_reason": str(exc),
-                    }
-                time.sleep(0.2 * retries)
 
     def _recent_order_id(self, session_id: str) -> str | None:
         for item in reversed(self.memory.recent_messages(session_id, limit=12)):
@@ -228,7 +166,14 @@ class FunctionCallingAgent:
         user_match = re.search(r"[0-9a-f]{24,}", user_message, re.IGNORECASE)
         order_id = user_match.group(0) if user_match else self._recent_order_id(sid)
         message_lower = user_message.lower()
-        if order_id and contains_any(message_lower, ["logistics", "shipping", "delivery", "物流", "快递", "到哪", "进度", "配送"]):
+
+        # Check session context: if previous tool was policy search and follow-up has no strong data intent, stay on policy
+        last_mode = self.memory.get_meta(sid, "last_mode") if hasattr(self.memory, "get_meta") else None
+        has_strong_data_intent = contains_any(user_message, ["查询", "查一下", "明细", "统计", "分析", "超过", "多少", "金额", "top", "最多"])
+        if last_mode in {"langchain_rag", "sql_rag_chain"} and not has_strong_data_intent and not user_match:
+            tool_name = "search_policy_docs"
+            validated_args = self._validate_tool_args(tool_name, {"query": user_message})
+        elif order_id and contains_any(message_lower, ["logistics", "shipping", "delivery", "物流", "快递", "到哪", "进度", "配送"]):
             tool_name = "query_logistics_status"
             validated_args = {"order_id": order_id}
         elif order_id and contains_any(message_lower, ["order status", "订单状态", "status", "订单进展"]):
@@ -252,14 +197,18 @@ class FunctionCallingAgent:
             validated_args = self._validate_tool_args(tool_name, {"query": user_message})
 
         result, duration_ms = timed_call(self._execute_tool, tool_name, validated_args)
-        tool_trace.append({"tool": tool_name, "arguments": validated_args, "duration_ms": duration_ms, "result_summary": summarize_text(json.dumps(result, ensure_ascii=False), limit=180)})
+        trace_entry: dict[str, Any] = {"tool": tool_name, "arguments": validated_args, "duration_ms": duration_ms, "result_summary": summarize_text(json.dumps(result, ensure_ascii=False), limit=180)}
+        structured = self._validate_tool_result(tool_name, result)
+        if structured is not None:
+            trace_entry["structured_output"] = structured
+        tool_trace.append(trace_entry)
 
         if tool_name == "query_refund_cases":
             aggregate_payload["metrics"] = [{"label": key, "value": value} for key, value in result.get("metrics", {}).items()]
             aggregate_payload["table"] = result.get("rows", [])
             aggregate_payload["sql_preview"] = result.get("sql_preview")
             aggregate_payload["highlights"] = [result.get("summary", "")]
-            summary = "未配置 LLM，已使用确定性工具 fallback 完成只读数据查询。"
+            summary = "（降级模式：未配置 LLM，使用确定性工具返回原始数据）已完成只读数据查询。如需自然语言总结，请配置 LLM_API_KEY。"
         elif tool_name == "search_policy_docs":
             aggregate_payload["citations"] = [{
                 "label": doc["citation"],
@@ -269,23 +218,26 @@ class FunctionCallingAgent:
                 "rerank_score": round(lexical_overlap_score(user_message, f"{doc['title']} {doc['excerpt']}"), 4),
             } for doc in result.get("documents", [])]
             aggregate_payload["highlights"] = [doc["title"] for doc in result.get("documents", [])]
-            summary = "未配置 LLM，已使用本地政策检索 fallback 返回可引用依据。"
+            summary = "（降级模式：未配置 LLM，使用本地政策检索返回可引用依据）如需 AI 生成自然语言回答，请配置 LLM_API_KEY。"
         elif tool_name in {"query_order_status", "query_logistics_status", "query_refund_eligibility", "query_policy_by_market"}:
             aggregate_payload["highlights"] = [json.dumps(result, ensure_ascii=False)]
             if tool_name == "query_refund_eligibility" and result.get("priority") == "high":
                 aggregate_payload["review_required"] = True
                 aggregate_payload["review_reason"] = "Refund eligibility returned high priority and requires supervisor escalation."
-            summary = "未配置 LLM，已使用新增业务工具完成确定性查询。"
+            summary = "（降级模式：未配置 LLM，使用确定性工具返回原始数据）已完成业务查询。如需 AI 总结，请配置 LLM_API_KEY。"
         else:
             if result.get("found"):
                 aggregate_payload["metrics"] = [{"label": key, "value": value} for key, value in result.get("metrics", {}).items()]
                 aggregate_payload["highlights"] = [f"风险分：{result['risk_score']}", f"风险等级：{result['risk_level']}", result["suggestion"]]
             else:
                 aggregate_payload["highlights"] = [result.get("message", "未找到用户记录。")]
-            summary = "未配置 LLM，已使用本地风险评分 fallback 返回结果。"
+            summary = "（降级模式：未配置 LLM，使用本地风险评分返回结果）如需 AI 分析，请配置 LLM_API_KEY。"
 
         self.memory.append(sid, "user", user_message)
         self.memory.append(sid, "assistant", summary)
+        # Track last tool for memory follow-up routing
+        if hasattr(self.memory, "set_meta") and tool_trace:
+            self.memory.set_meta(sid, "last_tool", tool_trace[-1].get("tool"))
         return {
             "mode": "function_call_agent",
             "title": "Function Calling Agent",
@@ -299,35 +251,22 @@ class FunctionCallingAgent:
         blocked = self._guardrail(user_message)
         if blocked:
             return blocked
-        unsupported = self._unsupported_query_response(user_message, session_id=session_id)
-        if unsupported:
-            return unsupported
         if not self.client:
             return self._respond_without_llm(user_message, session_id=session_id)
 
         sid = self.memory.get_or_create(session_id)
-        messages: list[dict[str, Any]] = [{
-            "role": "system",
-            "content": (
-                "你是企业级智能客诉 Copilot。你的职责是调用工具完成只读分析和政策检索。"
-                "禁止捏造数据，禁止执行审批、改单、删除或退款执行。"
-                "最终回答只写简洁结论、关键数字和下一步，最多 6 句话。"
-                "工具返回的明细会由前端单独渲染，禁止使用 Markdown 表格、代码块或逐行复述订单明细。"
-            ),
-        }]
+        messages: list[dict[str, Any]] = [{"role": "system", "content": "你是企业级智能客诉 Copilot。你的职责是调用工具完成只读分析和政策检索。禁止捏造数据，禁止执行审批、改单、删除或退款执行。"}]
         messages.extend(self.memory.recent_messages(sid))
         messages.append({"role": "user", "content": user_message})
         tool_trace: list[dict[str, Any]] = []
         aggregate_payload: dict[str, Any] = {}
         token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        model_trace: list[dict[str, Any]] = []
         retry_count = 0
 
         for _ in range(2):
             try:
                 response = self.client.chat.completions.create(model=self.settings.llm_model, messages=messages, tools=self._build_tools(), tool_choice="auto", temperature=0)
                 token_usage = add_token_usage(token_usage, extract_usage(response))
-                model_trace.append({"stage": "agent_tool_loop", "model": self.settings.llm_model, "provider": "openai_compatible"})
             except Exception as exc:
                 retry_count += 1
                 if retry_count <= self.settings.llm_max_retries:
@@ -338,7 +277,6 @@ class FunctionCallingAgent:
                 fallback["_token_usage"] = token_usage
                 fallback["degradation_path"] = "llm_error_to_local_tools"
                 fallback["error"] = {"code": "llm_call_failed", "message": str(exc)}
-                fallback["model_trace"] = model_trace
                 return fallback
             assistant_message = response.choices[0].message
             tool_calls = assistant_message.tool_calls or []
@@ -351,19 +289,22 @@ class FunctionCallingAgent:
                     fallback["highlights"] = ["模型响应未包含 tool_call，已使用确定性工具 fallback 保持演示稳定。", *fallback["highlights"]]
                     fallback["_retry_count"] = retry_count
                     fallback["_token_usage"] = token_usage
-                    fallback["model_trace"] = model_trace
                     return fallback
                 self.memory.append(sid, "user", user_message)
                 self.memory.append(sid, "assistant", answer)
-                return {"mode": "function_call_agent", "title": "Function Calling Agent", "summary": answer, "session_id": sid, "tool_trace": tool_trace, "model_trace": model_trace, "_retry_count": retry_count, "_token_usage": token_usage, **aggregate_payload}
+                return {"mode": "function_call_agent", "title": "Function Calling Agent", "summary": answer, "session_id": sid, "tool_trace": tool_trace, "_retry_count": retry_count, "_token_usage": token_usage, **aggregate_payload}
             messages.append({"role": "assistant", "content": assistant_message.content or "", "tool_calls": [{"id": call.id, "type": "function", "function": {"name": call.function.name, "arguments": call.function.arguments}} for call in tool_calls]})
             for call in tool_calls:
                 args: dict[str, Any] = {}
                 try:
                     args = safe_json_loads(call.function.arguments or "{}")
-                    validated_args = self._validate_tool_args(call.function.name, args, original_query=user_message)
+                    validated_args = self._validate_tool_args(call.function.name, args)
                     result, duration_ms = timed_call(self._execute_tool, call.function.name, validated_args)
-                    tool_trace.append({"tool": call.function.name, "arguments": validated_args, "duration_ms": duration_ms, "result_summary": summarize_text(json.dumps(result, ensure_ascii=False), limit=180)})
+                    trace_entry: dict[str, Any] = {"tool": call.function.name, "arguments": validated_args, "duration_ms": duration_ms, "result_summary": summarize_text(json.dumps(result, ensure_ascii=False), limit=180)}
+                    structured = self._validate_tool_result(call.function.name, result)
+                    if structured is not None:
+                        trace_entry["structured_output"] = structured
+                    tool_trace.append(trace_entry)
                 except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                     result = {"error": f"工具参数校验失败：{exc}"}
                     validated_args = args if isinstance(args, dict) else {}
@@ -390,4 +331,168 @@ class FunctionCallingAgent:
 
         self.memory.append(sid, "user", user_message)
         self.memory.append(sid, "assistant", "工具调用轮次已达上限。")
-        return {"mode": "function_call_agent", "title": "Function Calling Agent", "summary": "工具调用轮次已达上限，请调整问题后重试。", "session_id": sid, "tool_trace": tool_trace, "model_trace": model_trace, "_token_usage": token_usage, **aggregate_payload}
+        return {"mode": "function_call_agent", "title": "Function Calling Agent", "summary": "工具调用轮次已达上限，请调整问题后重试。", "session_id": sid, "tool_trace": tool_trace, **aggregate_payload}
+
+    def respond_stream(self, user_message: str, session_id: str | None = None) -> Generator[dict[str, Any], None, None]:
+        """Yield status, token, and final events for true SSE streaming."""
+        blocked = self._guardrail(user_message)
+        if blocked:
+            yield {"type": "final", "data": blocked}
+            return
+
+        if not self.client:
+            fallback = self._respond_without_llm(user_message, session_id=session_id)
+            # Split summary into sentences for simulated streaming
+            summary = fallback.get("summary", "")
+            sentences = re.split(r"(?<=[。！？\n])", summary)
+            for sentence in sentences:
+                if sentence.strip():
+                    yield {"type": "token", "content": sentence}
+            yield {"type": "final", "data": fallback}
+            return
+
+        sid = self.memory.get_or_create(session_id)
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "你是企业级智能客诉 Copilot。你的职责是调用工具完成只读分析和政策检索。禁止捏造数据，禁止执行审批、改单、删除或退款执行。"}
+        ]
+        messages.extend(self.memory.recent_messages(sid))
+        messages.append({"role": "user", "content": user_message})
+        tool_trace: list[dict[str, Any]] = []
+        aggregate_payload: dict[str, Any] = {}
+        token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        for turn in range(2):
+            try:
+                stream = self.client.chat.completions.create(
+                    model=self.settings.llm_model,
+                    messages=messages,
+                    tools=self._build_tools(),
+                    tool_choice="auto",
+                    temperature=0,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            except Exception as exc:
+                fallback = self._respond_without_llm(user_message, session_id=sid)
+                fallback["degradation_path"] = "llm_error_to_local_tools"
+                fallback["error"] = {"code": "llm_call_failed", "message": str(exc)}
+                yield {"type": "final", "data": fallback}
+                return
+
+            # Collect streamed content and tool_calls
+            content_parts: list[str] = []
+            tool_calls_data: dict[int, dict[str, Any]] = {}  # index -> {id, name, arguments}
+
+            for chunk in stream:
+                # Extract usage from final chunk
+                if hasattr(chunk, "usage") and chunk.usage:
+                    token_usage["prompt_tokens"] = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                    token_usage["completion_tokens"] = getattr(chunk.usage, "completion_tokens", 0) or 0
+                    token_usage["total_tokens"] = getattr(chunk.usage, "total_tokens", 0) or 0
+
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                # Stream content tokens
+                if delta.content:
+                    content_parts.append(delta.content)
+                    yield {"type": "token", "content": delta.content}
+
+                # Collect tool_calls
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc_delta.id:
+                            tool_calls_data[idx]["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tool_calls_data[idx]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tool_calls_data[idx]["arguments"] += tc_delta.function.arguments
+
+            # If no tool calls, we're done
+            if not tool_calls_data:
+                answer = "".join(content_parts) or "模型未返回有效内容。"
+                if not aggregate_payload and self._should_fallback_to_tools(user_message):
+                    fallback = self._respond_without_llm(user_message, session_id=sid)
+                    fallback["summary"] = "模型已连接，但本次未触发工具调用，系统已回退到受控工具链完成查询。"
+                    fallback.setdefault("highlights", [])
+                    fallback["highlights"] = ["模型响应未包含 tool_call，已使用确定性工具 fallback 保持演示稳定。", *fallback["highlights"]]
+                    fallback["_token_usage"] = token_usage
+                    yield {"type": "final", "data": fallback}
+                    return
+                self.memory.append(sid, "user", user_message)
+                self.memory.append(sid, "assistant", answer)
+                yield {"type": "final", "data": {
+                    "mode": "function_call_agent", "title": "Function Calling Agent",
+                    "summary": answer, "session_id": sid, "tool_trace": tool_trace,
+                    "_token_usage": token_usage, **aggregate_payload,
+                }}
+                return
+
+            # Execute tool calls
+            yield {"type": "status", "phase": "tools", "message": f"正在执行 {len(tool_calls_data)} 个工具调用。"}
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts), "tool_calls": []}
+            for idx in sorted(tool_calls_data.keys()):
+                tc = tool_calls_data[idx]
+                assistant_msg["tool_calls"].append({
+                    "id": tc["id"], "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                })
+            messages.append(assistant_msg)
+
+            for idx in sorted(tool_calls_data.keys()):
+                tc = tool_calls_data[idx]
+                args: dict[str, Any] = {}
+                try:
+                    args = safe_json_loads(tc["arguments"] or "{}")
+                    validated_args = self._validate_tool_args(tc["name"], args)
+                    result, duration_ms = timed_call(self._execute_tool, tc["name"], validated_args)
+                    trace_entry: dict[str, Any] = {
+                        "tool": tc["name"], "arguments": validated_args,
+                        "duration_ms": duration_ms,
+                        "result_summary": summarize_text(json.dumps(result, ensure_ascii=False), limit=180),
+                    }
+                    structured = self._validate_tool_result(tc["name"], result)
+                    if structured is not None:
+                        trace_entry["structured_output"] = structured
+                    tool_trace.append(trace_entry)
+                except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                    result = {"error": f"工具参数校验失败：{exc}"}
+                    validated_args = args if isinstance(args, dict) else {}
+                    tool_trace.append({"tool": tc["name"], "arguments": validated_args, "result_summary": str(exc)})
+
+                self._collect_tool_payload(tc["name"], result, aggregate_payload)
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(result, ensure_ascii=False)})
+
+        self.memory.append(sid, "user", user_message)
+        self.memory.append(sid, "assistant", "工具调用轮次已达上限。")
+        yield {"type": "final", "data": {
+            "mode": "function_call_agent", "title": "Function Calling Agent",
+            "summary": "工具调用轮次已达上限，请调整问题后重试。",
+            "session_id": sid, "tool_trace": tool_trace, **aggregate_payload,
+        }}
+
+    def _collect_tool_payload(self, tool_name: str, result: dict[str, Any], payload: dict[str, Any]) -> None:
+        """Update aggregate_payload from a tool result (shared by respond and respond_stream)."""
+        if tool_name == "query_refund_cases":
+            payload["metrics"] = [{"label": key, "value": value} for key, value in result.get("metrics", {}).items()]
+            payload["table"] = result.get("rows", [])
+            payload["sql_preview"] = result.get("sql_preview")
+            payload.setdefault("highlights", []).append(result.get("summary", ""))
+        elif tool_name == "search_policy_docs":
+            payload["citations"] = [{"label": doc["citation"], "text": doc["excerpt"], "retrieval_score": doc.get("retrieval_score"), "rerank_score": doc.get("rerank_score"), "source": doc.get("source")} for doc in result.get("documents", [])]
+            payload.setdefault("highlights", []).extend(doc["title"] for doc in result.get("documents", []))
+        elif tool_name == "get_user_risk" and result.get("found"):
+            payload["metrics"] = [{"label": key, "value": value} for key, value in result.get("metrics", {}).items()]
+            payload.setdefault("highlights", []).extend([f"风险分：{result['risk_score']}", f"风险等级：{result['risk_level']}", result["suggestion"]])
+        elif tool_name in {"query_order_status", "query_logistics_status", "query_refund_eligibility", "query_policy_by_market"}:
+            payload.setdefault("highlights", []).append(json.dumps(result, ensure_ascii=False))
+            if tool_name == "query_refund_eligibility" and result.get("priority") == "high":
+                payload["review_required"] = True
+                payload["review_reason"] = "Refund eligibility returned high priority and requires supervisor escalation."
+        elif result.get("error"):
+            payload.setdefault("highlights", []).append(result["error"])

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Copilot 请求生命周期 — 7 步流程图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0f172a; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; padding: 40px 20px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 8px; color: #f1f5f9; }
+  .subtitle { text-align: center; color: #94a3b8; margin-bottom: 40px; font-size: 15px; }
+  .subtitle span.user-input { color: #38bdf8; font-weight: 600; }
+
+  .flow { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 0; align-items: center; }
+
+  .step { width: 100%; background: #1e293b; border-radius: 12px; padding: 20px 24px; border: 1px solid #334155; position: relative; }
+  .step:hover { border-color: #3b82f6; box-shadow: 0 0 0 1px rgba(59,130,246,0.3); }
+  .step-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .step-num { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .step-title { font-size: 17px; font-weight: 600; }
+  .step-desc { font-size: 13px; color: #94a3b8; margin-top: -2px; }
+
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin: 8px 0 4px; font-size: 13px; }
+  .detail-grid .label { color: #64748b; }
+  .detail-grid .value { color: #cbd5e1; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .detail-grid .value.file { color: #a78bfa; }
+  .detail-grid .value.func { color: #34d399; }
+
+  .arrow { color: #475569; font-size: 20px; padding: 4px 0; line-height: 1; }
+
+  .step.s1 .step-num { background: #3b82f6; color: #fff; }
+  .step.s1 { border-left: 3px solid #3b82f6; }
+  .step.s2 .step-num { background: #8b5cf6; color: #fff; }
+  .step.s2 { border-left: 3px solid #8b5cf6; }
+  .step.s3 .step-num { background: #f59e0b; color: #fff; }
+  .step.s3 { border-left: 3px solid #f59e0b; }
+  .step.s4 .step-num { background: #ef4444; color: #fff; }
+  .step.s4 { border-left: 3px solid #ef4444; }
+  .step.s5 .step-num { background: #10b981; color: #fff; }
+  .step.s5 { border-left: 3px solid #10b981; }
+  .step.s6 .step-num { background: #ec4899; color: #fff; }
+  .step.s6 { border-left: 3px solid #ec4899; }
+  .step.s7 .step-num { background: #06b6d4; color: #fff; }
+  .step.s7 { border-left: 3px solid #06b6d4; }
+
+  /* Sub-flow inside step 4 */
+  .sub-flow { background: #0f172a; border-radius: 8px; padding: 12px 16px; margin: 10px 0 0; border: 1px dashed #334155; }
+  .sub-flow-title { font-size: 12px; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sub-step { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; font-size: 13px; }
+  .sub-step .idx { color: #475569; font-family: monospace; min-width: 18px; }
+  .sub-step .dir { color: #64748b; font-size: 11px; }
+  .sub-arrow { color: #334155; font-size: 12px; padding-left: 26px; }
+
+  .code-tag { display: inline-block; background: #1e293b; border: 1px solid #334155; border-radius: 4px; padding: 1px 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #a78bfa; }
+
+  .legend { max-width: 1000px; margin: 40px auto 0; display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; font-size: 13px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; background: #1e293b; padding: 6px 14px; border-radius: 20px; border: 1px solid #334155; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+
+  @media (max-width: 640px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .step { padding: 14px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>📋 请求生命周期：7 步完整链路</h1>
+<p class="subtitle">场景：用户输入 <span class="user-input">"查一下上个月的高赔付订单"</span>（function_call_agent 模式）</p>
+
+<div class="flow">
+
+  <!-- Step 1 -->
+  <div class="step s1">
+    <div class="step-header">
+      <div class="step-num">1</div>
+      <div>
+        <div class="step-title">前端捕获 &amp; 发起请求</div>
+        <div class="step-desc">用户在 Copilot 页面输入消息，点击发送</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">frontend/src/views/CopilotView.vue</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">frontend/src/stores/chat.ts</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">chatStore.sendMessage()</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">streamChat() → SSE 请求</span></div>
+      <div><span class="label">⬅️ 输入</span> <span class="value">用户消息 + mode + session_id</span></div>
+      <div><span class="label">➡️ 输出</span> <span class="value">HTTP POST /api/chat/stream （SSE）</span></div>
+    </div>
+    <div style="margin-top:6px;font-size:12px;color:#64748b;">💡 设计决策：优先 SSE 流式（打字机效果），失败自动回退到普通 POST</div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 2 -->
+  <div class="step s2">
+    <div class="step-header">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">安全检查（JWT + RBAC）</div>
+        <div class="step-desc">后端验证身份和权限，确保请求合法</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">app/runtime.py（路由入口）</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">app/http_auth.py</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">app/permissions.py</span></div>
+      <div><span class="label">🔧 链条</span> <span class="value func">① JWT 解密 → ② RBAC 检查</span></div>
+      <div><span class="label">⬅️ 输入</span> <span class="value">HTTP Header: Authorization: Bearer xxx</span></div>
+      <div><span class="label">✅ 通过</span> <span class="value">用户是 analyst，用 function_call_agent → 允许</span></div>
+    </div>
+    <div style="margin-top:6px;font-size:12px;color:#64748b;">💡 Viewer 不能对话；analyst 和 supervisor 可以用全部模式</div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 3 -->
+  <div class="step s3">
+    <div class="step-header">
+      <div class="step-num">3</div>
+      <div>
+        <div class="step-title">路由决策 + 安全护栏</div>
+        <div class="step-desc">判断应该走哪个 Agent 模式 + 检查消息是否危险</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">app/routing.py</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">app/domain.py（护栏规则）</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">app/orchestrator.py（_respond_impl）</span></div>
+    </div>
+    <div style="margin:8px 0 4px;font-size:13px;background:#0f172a;border-radius:6px;padding:10px 14px;">
+      <div style="color:#f59e0b;font-weight:600;margin-bottom:4px;">🔀 路由决策逻辑（AutoRouter）</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 16px;font-size:13px;">
+        <span style="color:#475569;">1.</span><span><span class="code-tag">_rule_route()</span> 6条正则 → 匹配 "查" + "赔付" → 置信度 <b>0.85</b></span>
+        <span style="color:#475569;">2.</span><span>0.85 ≥ 0.8 → <span style="color:#34d399;font-weight:600;">直接采用规则路由结果</span></span>
+        <span style="color:#475569;">3.</span><span>路由结果：<span class="code-tag">function_call_agent</span></span>
+        <span style="color:#475569;">4.</span><span><span class="code-tag">_guardrail()</span> 检查 4 类危险模式 → ✅ 通过</span>
+      </div>
+    </div>
+    <div style="margin-top:4px;font-size:12px;color:#64748b;">💡 80% 场景靠规则路由（零延迟），置信度低于 0.8 才走 LLM 路由</div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 4 -->
+  <div class="step s4">
+    <div class="step-header">
+      <div class="step-num">4</div>
+      <div>
+        <div class="step-title">Agent 执行：ReAct 循环（核心）</div>
+        <div class="step-desc">Function Calling Agent 的核心——LLM 决定工具 → 执行 → LLM 生成回答</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">app/function_agent.py</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">respond()</span></div>
+    </div>
+
+    <div class="sub-flow">
+      <div class="sub-flow-title">ReAct 循环内部 5 个子步骤</div>
+      <div class="sub-step"><span class="idx">a.</span><span>构建 <span class="code-tag">_build_tools()</span> — 7 个工具定义 + system prompt</span></div>
+      <div class="sub-arrow">⬇</div>
+      <div class="sub-step"><span class="idx">b.</span><span><b>第 1 轮 LLM 调用</b> — 把工具列表发给 LLM</span></div>
+      <div class="sub-arrow">⬇</div>
+      <div class="sub-step"><span class="idx">c.</span><span>LLM 返回 <span class="code-tag">tool_calls</span> → 选择了 <code>query_refund_cases</code></span></div>
+      <div class="sub-arrow">⬇</div>
+      <div class="sub-step"><span class="idx">d.</span><span><span class="code-tag">_execute_tool()</span> — Pydantic 验证参数 → 调 SQL</span></div>
+      <div class="sub-arrow">⬇</div>
+      <div class="sub-step"><span class="idx">e.</span><span><b>第 2 轮 LLM 调用</b> — 工具结果拼入 messages → LLM 生成最终回答</span></div>
+    </div>
+    <div style="margin-top:6px;font-size:12px;color:#64748b;">💡 最多 2 轮工具调用，防止死循环。有 <code>_respond_without_llm()</code> 降级策略</div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 5 -->
+  <div class="step s5">
+    <div class="step-header">
+      <div class="step-num">5</div>
+      <div>
+        <div class="step-title">数据查询：SQL 执行层</div>
+        <div class="step-desc">实际执行数据库查询，返回结构化数据</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">app/ticket_store.py</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">query_ticket_details()</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">_where_clause()</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">validate_readonly_sql()</span></div>
+    </div>
+    <div style="margin:8px 0 4px;font-size:13px;background:#0f172a;border-radius:6px;padding:10px 14px;">
+      <div style="color:#10b981;font-weight:600;margin-bottom:4px;">🛡️ SQL 安全三件套</div>
+      <div style="font-size:13px;line-height:1.7;">
+        ① 参数化查询（<span class="code-tag">?</span> 占位符）→ 防 SQL 注入<br>
+        ② <span class="code-tag">validate_readonly_sql()</span> → 只允许 SELECT / WITH<br>
+        ③ 禁止多条语句 → 防分号追加恶意 SQL
+      </div>
+    </div>
+    <div style="margin-top:6px;font-size:12px;color:#64748b;">
+      ✅ 输入："上个月高赔付订单" → 输出：42 条异常 + 平均赔付 156.7 元 + 总赔付 6,581.4 元
+    </div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 6 -->
+  <div class="step s6">
+    <div class="step-header">
+      <div class="step-num">6</div>
+      <div>
+        <div class="step-title">后处理：审计 + 复核 + 成本</div>
+        <div class="step-desc">记录审计日志、判断是否入复核队列、统计 token 和成本</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">app/orchestrator.py（respond 末尾）</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">app/audit_stores.py</span></div>
+      <div><span class="label">🔧 链条</span> <span class="value func">① audit_log.record → ② review_queue.enqueue</span></div>
+    </div>
+    <div style="margin:8px 0 4px;font-size:13px;background:#0f172a;border-radius:6px;padding:10px 14px;">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 16px;font-size:13px;">
+        <span class="label">审计记录</span><span>request_id、用户消息、模式、工具轨迹、延迟、token、花费</span>
+        <span class="label">复核判断</span><span>高赔付 ≥ 100 元？消息含"主管"？护栏命中？ → 入队</span>
+        <span class="label">成本统计</span><span>prompt_tokens + completion_tokens → estimated_cost_usd</span>
+      </div>
+    </div>
+  </div>
+  <div class="arrow">⬇</div>
+
+  <!-- Step 7 -->
+  <div class="step s7">
+    <div class="step-header">
+      <div class="step-num">7</div>
+      <div>
+        <div class="step-title">前端展示结果</div>
+        <div class="step-desc">SSE 流式接收 → 打字机效果 → 完整结果渲染</div>
+      </div>
+    </div>
+    <div class="detail-grid">
+      <div><span class="label">📄 文件</span> <span class="value file">frontend/src/stores/chat.ts</span></div>
+      <div><span class="label">📄 文件</span> <span class="value file">frontend/src/api/client.ts</span></div>
+      <div><span class="label">🔧 函数</span> <span class="value func">streamChat() SSE 解析</span></div>
+    </div>
+    <div style="margin:8px 0 4px;font-size:13px;background:#0f172a;border-radius:6px;padding:10px 14px;">
+      <div style="color:#06b6d4;font-weight:600;margin-bottom:4px;">📡 SSE 事件流</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 16px;font-size:13px;">
+        <span class="code-tag">event: status</span><span>"正在识别意图..."</span>
+        <span class="code-tag">event: token</span><span>"上个月共发现 42 笔..."（打字机效果）</span>
+        <span class="code-tag">event: status</span><span>"正在整理结果..."</span>
+        <span class="code-tag">event: final</span><span>完整响应：summary + table + highlights + tool_trace + citations</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> 前端</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> 安全</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> 路由</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> Agent</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div> 数据</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ec4899"></div> 后处理</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#06b6d4"></div> 展示</div>
+</div>
+
+</body>
+</html>

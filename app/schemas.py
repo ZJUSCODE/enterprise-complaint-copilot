@@ -60,7 +60,7 @@ class LoginResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
-    mode: Literal["function_call_agent", "sql_rag_chain", "langchain_rag", "router_demo", "auto"] = "function_call_agent"
+    mode: Literal["function_call_agent", "sql_rag_chain", "langchain_rag", "router_demo", "auto", "modular_rag", "multi_agent"] = "function_call_agent"
     session_id: str | None = None
     role: Literal["viewer", "analyst", "supervisor"] | None = "analyst"
     response_language: Literal["auto", "zh", "en"] = "auto"
@@ -93,3 +93,63 @@ class MCPRequest(BaseModel):
     id: str | int | None = None
     method: str = Field(min_length=1, max_length=80)
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+# --- Structured tool output models ---
+
+class LogisticsStatusResult(BaseModel):
+    order_id: str
+    status: str
+    carrier: str | None = None
+    tracking_number: str | None = None
+    estimated_delivery: str | None = None
+    delay_days: int | None = None
+    last_update: str | None = None
+
+
+class RefundEligibilityResult(BaseModel):
+    order_id: str
+    eligible: bool
+    reason: str | None = None
+    priority: str = "normal"
+    escalation_needed: bool = False
+    refund_amount: float | None = None
+
+
+class UserRiskResult(BaseModel):
+    found: bool = False
+    user_id: str | None = None
+    risk_score: float | None = None
+    risk_level: str | None = None
+    suggestion: str | None = None
+    metrics: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PolicySearchResult(BaseModel):
+    documents: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RefundCasesResult(BaseModel):
+    summary: str = ""
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    sql_preview: str | None = None
+
+
+class OrderStatusResult(BaseModel):
+    order_id: str
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+    total_amount: float | None = None
+
+
+TOOL_RESULT_MODELS: dict[str, type[BaseModel]] = {
+    "get_user_risk": UserRiskResult,
+    "query_refund_cases": RefundCasesResult,
+    "search_policy_docs": PolicySearchResult,
+    "query_order_status": OrderStatusResult,
+    "query_logistics_status": LogisticsStatusResult,
+    "query_refund_eligibility": RefundEligibilityResult,
+    "query_policy_by_market": PolicySearchResult,
+}

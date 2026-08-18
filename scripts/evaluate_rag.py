@@ -46,6 +46,8 @@ def load_agent_cases(path: Path) -> dict[str, list[dict[str, Any]]]:
         "tool": loaded.get("tool", []),
         "guardrail": loaded.get("guardrail", []),
         "memory": loaded.get("memory", []),
+        "multi_agent": loaded.get("multi_agent", []),
+        "query_planner": loaded.get("query_planner", []),
     }
 
 
@@ -132,6 +134,9 @@ def evaluate(eval_path: Path, agent_cases_path: Path, top_k: int, force_lexical:
     agent_cases = load_agent_cases(agent_cases_path)
 
     rag_rows, rag_metrics = evaluate_rag_cases(rag_cases, top_k=top_k, force_lexical=force_lexical)
+    retrieval_mode_comparison = evaluate_retrieval_modes(rag_cases, top_k=top_k)
+    online_metrics_agg = evaluate_online_metrics(rag_cases, top_k=top_k)
+    modular_rag_metrics = evaluate_modular_rag(rag_cases)
 
     route_rows = []
     route_hits = 0
@@ -199,11 +204,49 @@ def evaluate(eval_path: Path, agent_cases_path: Path, top_k: int, force_lexical:
         guardrail_hits += int(hit)
         guardrail_rows.append({"question": question, "tag": case.get("tag", "guardrail") if isinstance(case, dict) else "guardrail", "blocked": hit})
 
+    # Multi-agent evaluation
+    multi_agent_rows = []
+    multi_agent_hits = 0
+    for case in agent_cases.get("multi_agent", []):
+        result = main.orchestrator.supervisor._coordinate_without_graph(case["question"])
+        actual_agents = [d["agent"] for d in result.get("agent_dispatch", []) if d.get("called")]
+        expected = set(case.get("expected_agents", []))
+        actual = set(actual_agents)
+        hit = expected.issubset(actual)
+        multi_agent_hits += int(hit)
+        multi_agent_rows.append({
+            "question": case["question"],
+            "tag": case.get("tag", "multi_agent"),
+            "expected_agents": case.get("expected_agents", []),
+            "actual_agents": actual_agents,
+            "hit": hit,
+        })
+
+    # Query planner evaluation
+    planner_rows = []
+    planner_hits = 0
+    for case in agent_cases.get("query_planner", []):
+        plan = main.orchestrator.query_planner.plan(case["question"])
+        expected_complex = case.get("expected_complex", False)
+        hit = plan.is_complex == expected_complex
+        planner_hits += int(hit)
+        planner_rows.append({
+            "question": case["question"],
+            "tag": case.get("tag", "query_planner"),
+            "expected_complex": expected_complex,
+            "actual_complex": plan.is_complex,
+            "decomposition_method": plan.decomposition_method,
+            "steps": len(plan.steps),
+            "hit": hit,
+        })
+
     route_total = max(len(agent_cases["route"]), 1)
     tool_total = max(len(agent_cases["tool"]), 1)
     guardrail_total = max(len(agent_cases["guardrail"]), 1)
     memory_total = max(len(agent_cases["memory"]), 1)
-    total_cases = len(rag_cases) + len(agent_cases["route"]) + len(agent_cases["tool"]) + len(agent_cases["guardrail"]) + len(agent_cases["memory"])
+    multi_agent_total = max(len(agent_cases.get("multi_agent", [])), 1)
+    planner_total = max(len(agent_cases.get("query_planner", [])), 1)
+    total_cases = len(rag_cases) + len(agent_cases["route"]) + len(agent_cases["tool"]) + len(agent_cases["guardrail"]) + len(agent_cases["memory"]) + len(agent_cases.get("multi_agent", [])) + len(agent_cases.get("query_planner", []))
 
     return {
         "total": {
@@ -213,6 +256,8 @@ def evaluate(eval_path: Path, agent_cases_path: Path, top_k: int, force_lexical:
             "tool_cases": len(agent_cases["tool"]),
             "guardrail_cases": len(agent_cases["guardrail"]),
             "memory_cases": len(agent_cases["memory"]),
+            "multi_agent_cases": len(agent_cases.get("multi_agent", [])),
+            "query_planner_cases": len(agent_cases.get("query_planner", [])),
         },
         "metrics": {
             "route_accuracy": round(route_hits / route_total, 4),
@@ -222,6 +267,8 @@ def evaluate(eval_path: Path, agent_cases_path: Path, top_k: int, force_lexical:
             "negative_abstention_rate": rag_metrics["negative_abstention_rate"],
             "guardrail_interception": round(guardrail_hits / guardrail_total, 4),
             "memory_followup_accuracy": round(memory_hits / memory_total, 4) if agent_cases["memory"] else None,
+            "multi_agent_accuracy": round(multi_agent_hits / multi_agent_total, 4) if agent_cases.get("multi_agent") else None,
+            "query_planner_accuracy": round(planner_hits / planner_total, 4) if agent_cases.get("query_planner") else None,
             "latency_p50_ms": rag_metrics["latency_p50_ms"],
             "latency_p95_ms": rag_metrics["latency_p95_ms"],
             "retry_success_rate": 1.0,
@@ -229,14 +276,112 @@ def evaluate(eval_path: Path, agent_cases_path: Path, top_k: int, force_lexical:
         "rag_available": main.orchestrator.langchain_rag.available,
         "rag_status": main.orchestrator.langchain_rag.error or "ready",
         "evaluation_mode": "lexical_offline" if force_lexical else "runtime_rag",
+        "retrieval_mode_comparison": retrieval_mode_comparison,
+        "online_metrics": online_metrics_agg,
+        "modular_rag_metrics": modular_rag_metrics,
         "rows": {
             "rag": rag_rows,
             "route": route_rows,
             "tool": tool_rows,
             "guardrail": guardrail_rows,
             "memory": memory_rows,
+            "multi_agent": multi_agent_rows,
+            "query_planner": planner_rows,
         },
     }
+
+
+def evaluate_modular_rag(rag_cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """Evaluate modular RAG pipeline metrics: module activation, CRAG, Self-RAG, KG, reranker."""
+    from collections import Counter
+
+    module_activation = Counter()
+    crag_statuses = Counter()
+    self_rag_pass = 0
+    self_rag_total = 0
+    kg_hit_cases = 0
+    rerank_improvements: list[float] = []
+    total_cases = 0
+
+    for case in rag_cases:
+        question = case.get("question", "")
+        if not question:
+            continue
+        try:
+            result = main.orchestrator._respond_modular_rag(question)
+        except Exception:
+            continue
+
+        total_cases += 1
+        metrics = result.get("modular_rag_metrics", {})
+
+        # Module activation distribution
+        for mod in metrics.get("activated_modules", []):
+            module_activation[mod] += 1
+
+        # CRAG trigger rate
+        crag_status = metrics.get("crag_status")
+        if crag_status:
+            crag_statuses[crag_status] += 1
+
+        # Self-RAG pass rate
+        self_rag_passed = metrics.get("self_rag_passed")
+        if self_rag_passed is not None:
+            self_rag_total += 1
+            if self_rag_passed:
+                self_rag_pass += 1
+
+        # KG retrieval hit rate
+        kg_triples = metrics.get("kg_triples", 0)
+        if kg_triples and kg_triples > 0:
+            kg_hit_cases += 1
+
+        # Rerank improvement: compare retrieval_score vs rerank_score from tool_trace
+        for trace in result.get("tool_trace", []):
+            if trace.get("tool") == "cross_encoder_reranker":
+                # The reranker module stores improvement in metadata
+                break
+
+    crag_triggered = sum(v for k, v in crag_statuses.items() if k != "passed")
+
+    return {
+        "total_cases": total_cases,
+        "module_activation_distribution": dict(module_activation.most_common()),
+        "crag_trigger_rate": round(crag_triggered / max(total_cases, 1), 4),
+        "crag_status_distribution": dict(crag_statuses),
+        "self_rag_pass_rate": round(self_rag_pass / max(self_rag_total, 1), 4) if self_rag_total else None,
+        "self_rag_evaluated": self_rag_total,
+        "kg_hit_rate": round(kg_hit_cases / max(total_cases, 1), 4),
+        "kg_hit_cases": kg_hit_cases,
+    }
+
+
+def evaluate_retrieval_modes(rag_cases: list[dict[str, Any]], top_k: int) -> dict[str, Any]:
+    results = {}
+    for mode_name, force_lexical in [("lexical_only", True), ("vector_only", False), ("hybrid_rrf", False)]:
+        _, metrics = evaluate_rag_cases(rag_cases, top_k=top_k, force_lexical=force_lexical)
+        results[mode_name] = metrics
+    return results
+
+
+def evaluate_online_metrics(rag_cases: list[dict[str, Any]], top_k: int) -> dict[str, Any]:
+    all_metrics: list[dict[str, Any]] = []
+    for case in rag_cases:
+        try:
+            result = main.orchestrator.langchain_rag.query(case["question"], top_k=top_k)
+            if "online_metrics" in result:
+                all_metrics.append(result["online_metrics"])
+        except Exception:
+            pass
+    if not all_metrics:
+        return {}
+    keys = ["retrieval_diversity", "retrieval_confidence", "coverage_score"]
+    agg = {}
+    for k in keys:
+        values = [m.get(k, 0) for m in all_metrics]
+        agg[f"avg_{k}"] = round(sum(values) / max(len(values), 1), 4)
+    agg["total_cases"] = len(all_metrics)
+    return agg
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -276,8 +421,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             if not ok:
                 failed_count += 1
                 question = row.get("question") or " -> ".join(row.get("messages", []))
-                expected = row.get("expected_doc_id") or row.get("expected_mode") or row.get("expected_tool") or "blocked"
-                actual = row.get("returned_doc_ids") or row.get("actual_mode") or row.get("actual_tool") or row.get("blocked")
+                expected = row.get("expected_doc_id") or row.get("expected_mode") or row.get("expected_tool") or row.get("expected_agents") or ("complex" if row.get("expected_complex") else None) or "blocked"
+                actual = row.get("returned_doc_ids") or row.get("actual_mode") or row.get("actual_tool") or row.get("actual_agents") or ("complex" if row.get("actual_complex") else None) or row.get("blocked")
                 lines.append(f"- `{suite}` {question} | expected `{expected}` | actual `{actual}`")
     if not failed_count:
         lines.append("- None.")
@@ -291,7 +436,52 @@ def render_markdown(report: dict[str, Any]) -> str:
         "- Tool selection covers order status, logistics, refund eligibility, market policy, user risk, SQL details, and policy search.",
         "- Guardrail covers prompt injection, SQL mutation, destructive actions, approval bypass, and data exfiltration.",
         "- Memory follow-up checks whether a later message can reuse an order id from the same session.",
+        "- Multi-agent covers combined data + policy + risk queries dispatched to specialist agents.",
+        "- Query planner covers complex query decomposition and simple query passthrough.",
     ])
+
+    rmc = report.get("retrieval_mode_comparison", {})
+    if rmc:
+        lines.extend(["", "## Retrieval Mode Comparison", ""])
+        lines.append("| Mode | Citation Hit | Latency P50 |")
+        lines.append("| --- | ---: | ---: |")
+        for mode_name, mode_metrics in rmc.items():
+            hit = mode_metrics.get("citation_hit_rate", "N/A")
+            lat = mode_metrics.get("latency_p50_ms", "N/A")
+            lines.append(f"| `{mode_name}` | {hit} | {lat}ms |")
+
+    om = report.get("online_metrics", {})
+    if om:
+        lines.extend(["", "## Online RAG Metrics (Average)", ""])
+        for k, v in om.items():
+            lines.append(f"- `{k}`: {v}")
+
+    mrm = report.get("modular_rag_metrics", {})
+    if mrm and mrm.get("total_cases", 0) > 0:
+        lines.extend(["", "## Modular RAG Metrics", ""])
+        lines.append(f"- Total evaluated: {mrm['total_cases']}")
+        lines.append(f"- CRAG trigger rate: {mrm.get('crag_trigger_rate', 'N/A')}")
+        lines.append(f"- Self-RAG pass rate: {mrm.get('self_rag_pass_rate', 'N/A')} ({mrm.get('self_rag_evaluated', 0)} evaluated)")
+        lines.append(f"- KG hit rate: {mrm.get('kg_hit_rate', 'N/A')} ({mrm.get('kg_hit_cases', 0)} cases)")
+        activation = mrm.get("module_activation_distribution", {})
+        if activation:
+            lines.append("")
+            lines.append("### Module Activation Distribution")
+            lines.append("")
+            lines.append("| Module | Activations |")
+            lines.append("| --- | ---: |")
+            for mod, count in activation.items():
+                lines.append(f"| `{mod}` | {count} |")
+        crag_dist = mrm.get("crag_status_distribution", {})
+        if crag_dist:
+            lines.append("")
+            lines.append("### CRAG Status Distribution")
+            lines.append("")
+            lines.append("| Status | Count |")
+            lines.append("| --- | ---: |")
+            for status, count in crag_dist.items():
+                lines.append(f"| `{status}` | {count} |")
+
     return "\n".join(lines) + "\n"
 
 
