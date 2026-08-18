@@ -16,13 +16,15 @@ def assert_true(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def test_auto_router() -> None:
+def test_auto_router(monkeypatch) -> None:
+    monkeypatch.setattr(main.orchestrator.router, "client", None)
     decision = main.orchestrator.router.route("查一下质量问题退款超过100元的明细")
     assert_true(decision["mode"] == "function_call_agent", f"unexpected route: {decision}")
     assert_true(decision["confidence"] >= 0.8, f"low route confidence: {decision}")
 
 
-def test_auto_router_sql_rag_chain() -> None:
+def test_auto_router_sql_rag_chain(monkeypatch) -> None:
+    monkeypatch.setattr(main.orchestrator.router, "client", None)
     decision = main.orchestrator.router.route("质量问题退款超过100元的明细，按 SOP 是否需要主管复核")
     assert_true(decision["mode"] == "sql_rag_chain", f"unexpected route: {decision}")
     assert_true(decision["confidence"] >= 0.8, f"low route confidence: {decision}")

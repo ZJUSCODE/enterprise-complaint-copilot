@@ -46,8 +46,11 @@ export interface OverviewResponse {
   top_keywords: KeywordItem[];
   complaint_mix: CountItem[];
   latest_snapshot: string;
+  trend_window_start?: string | null;
+  trend_window_end?: string | null;
   api_configured: boolean;
   langchain_rag_enabled: boolean;
+  rag_retrieval_mode?: 'vector' | 'lexical';
   llm_model: string;
   rag_status: string;
   data_query_backend: string;
@@ -244,6 +247,11 @@ export interface ChatResponse {
   };
   graph_trace?: string[];
   graph_engine?: string;
+  model_trace?: Array<{
+    stage: string;
+    model: string;
+    provider?: string;
+  }>;
 }
 
 export interface ChatRequest {

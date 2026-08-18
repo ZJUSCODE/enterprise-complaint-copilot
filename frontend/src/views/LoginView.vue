@@ -1,57 +1,70 @@
 <template>
   <div class="login-page">
-    <section class="login-panel">
-      <div class="login-copy">
-        <p class="eyebrow">进入工作台</p>
-        <h1>选择身份后继续处理客诉。</h1>
-        <p>不同角色对应不同的数据与操作权限。运营分析使用 analyst，人工复核使用 supervisor。</p>
-        <RouterLink class="text-link" to="/public">了解平台能力</RouterLink>
+    <section class="login-intro">
+      <div class="login-brand">
+        <span class="brand-mark inverse">C</span>
+        <strong>客诉 Copilot</strong>
       </div>
-
-      <el-alert v-if="auth.error" :title="auth.error" type="error" show-icon />
-
-      <div class="role-options">
-        <button
-          v-for="item in roleOptions"
-          :key="item.username"
-          type="button"
-          :class="{ active: username === item.username }"
-          @click="fill(item.username, item.password)"
-        >
-          <strong>{{ item.role }}</strong>
-          <span>{{ item.intent }}</span>
-        </button>
+      <div>
+        <h1>让每次客诉处理，都有数据和规则依据。</h1>
+        <p>统一查询异常工单、售后 SOP 与人工复核记录。</p>
       </div>
+      <div class="login-system-status">
+        <span><i class="live-dot" /> Terra 已连接</span>
+        <span>只读数据访问</span>
+      </div>
+    </section>
 
-      <el-form class="login-form" @submit.prevent="submit">
-        <el-form-item label="账号">
-          <el-input v-model="username" autocomplete="username" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="password" type="password" autocomplete="current-password" show-password />
-        </el-form-item>
-        <el-button type="primary" native-type="submit" :loading="auth.loading">登录</el-button>
-      </el-form>
+    <section class="login-form-area">
+      <div class="login-panel">
+        <div class="login-copy">
+          <h2>登录工作台</h2>
+          <p>选择演示权限，账号会自动填充。</p>
+        </div>
+
+        <el-alert v-if="auth.error" :title="auth.error" type="error" show-icon />
+
+        <div class="role-segment" aria-label="演示权限">
+          <button
+            v-for="item in roleOptions"
+            :key="item.username"
+            type="button"
+            :class="{ active: username === item.username }"
+            @click="fill(item.username, item.password)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+
+        <el-form class="login-form" label-position="top" @submit.prevent="submit">
+          <el-form-item label="账号">
+            <el-input v-model="username" autocomplete="username" />
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="password" type="password" autocomplete="current-password" show-password />
+          </el-form-item>
+          <el-button type="primary" native-type="submit" :loading="auth.loading">进入工作台</el-button>
+        </el-form>
+      </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-
 const username = ref('analyst@example.com');
 const password = ref('Analyst@123');
 
 const roleOptions = [
-  { role: 'viewer', intent: '只看风险和结论', username: 'viewer@example.com', password: 'Viewer@123' },
-  { role: 'analyst', intent: '查询明细和生成判断', username: 'analyst@example.com', password: 'Analyst@123' },
-  { role: 'supervisor', intent: '处理人工复核', username: 'supervisor@example.com', password: 'Supervisor@123' },
+  { label: '查看', username: 'viewer@example.com', password: 'Viewer@123' },
+  { label: '分析', username: 'analyst@example.com', password: 'Analyst@123' },
+  { label: '复核', username: 'supervisor@example.com', password: 'Supervisor@123' },
 ];
 
 function fill(nextUsername: string, nextPassword: string) {

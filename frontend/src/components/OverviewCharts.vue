@@ -1,22 +1,12 @@
 <template>
   <section class="chart-grid" aria-label="风险趋势">
-    <div class="chart-panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">风险占比</p>
-          <h2>{{ formatPercent(overview.risk_rate) }}</h2>
-        </div>
-        <span>{{ overview.high_risk_cnt }} / {{ overview.total_users }} 用户</span>
-      </div>
-      <div ref="riskRef" class="chart-box" />
-    </div>
     <div class="chart-panel wide">
       <div class="panel-head">
         <div>
           <p class="eyebrow">近 30 日异常</p>
-          <h2>{{ latestBadCount }} 单</h2>
+          <h2>{{ periodBadCount }} 单</h2>
         </div>
-        <span>{{ overview.latest_snapshot }}</span>
+        <span>{{ trendRange }}</span>
       </div>
       <div ref="trendRef" class="chart-box" />
     </div>
@@ -24,59 +14,41 @@
 </template>
 
 <script setup lang="ts">
-import { LineChart, PieChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent } from 'echarts/components';
+import { LineChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { init, use, type ECharts } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { OverviewResponse } from '@/types/api';
-import { formatPercent } from '@/utils/format';
 
 const props = defineProps<{
   overview: OverviewResponse;
 }>();
 
-const riskRef = ref<HTMLDivElement | null>(null);
 const trendRef = ref<HTMLDivElement | null>(null);
-use([PieChart, LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
-let riskChart: ECharts | null = null;
 let trendChart: ECharts | null = null;
 
-const latestBadCount = computed(() => props.overview.trend[props.overview.trend.length - 1]?.bad || 0);
+const periodBadCount = computed(() => props.overview.trend.reduce((sum, item) => sum + item.bad, 0));
+const trendRange = computed(() => {
+  const start = props.overview.trend_window_start || props.overview.trend[0]?.date;
+  const end = props.overview.trend_window_end || props.overview.trend[props.overview.trend.length - 1]?.date;
+  if (!start || !end) return '无趋势数据';
+  return `${start.slice(5).replace('-', '/')} - ${end.slice(5).replace('-', '/')}`;
+});
 
 function renderCharts() {
-  if (!riskRef.value || !trendRef.value) return;
-  riskChart?.dispose();
+  if (!trendRef.value) return;
   trendChart?.dispose();
 
-  riskChart = init(riskRef.value);
   trendChart = init(trendRef.value);
-
-  const highRisk = props.overview.high_risk_cnt;
-  const others = Math.max(props.overview.total_users - highRisk, 0);
-
-  riskChart.setOption({
-    color: ['#c92a2a', '#dfe8ea'],
-    tooltip: { trigger: 'item' },
-    series: [
-      {
-        type: 'pie',
-        radius: ['62%', '82%'],
-        avoidLabelOverlap: true,
-        label: { color: '#202124' },
-        data: [
-          { value: highRisk, name: '高风险' },
-          { value: others, name: '其他用户' },
-        ],
-      },
-    ],
-  });
 
   trendChart.setOption({
     color: ['#0b6b57', '#2563eb'],
     tooltip: { trigger: 'axis' },
-    grid: { left: 36, right: 18, top: 28, bottom: 32 },
+    legend: { top: 0, right: 0, textStyle: { color: '#5f6368' } },
+    grid: { left: 36, right: 18, top: 38, bottom: 32 },
     xAxis: {
       type: 'category',
       data: props.overview.trend.map((item) => item.date),
@@ -85,19 +57,21 @@ function renderCharts() {
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: '#5f6368' },
+      name: '单',
+      nameTextStyle: { color: '#5f6368', padding: [0, 0, 0, -18] },
+      axisLabel: { color: '#5f6368', formatter: '{value} 单' },
       splitLine: { lineStyle: { color: '#e6ecef' } },
     },
     series: [
       {
-        name: '异常评价',
+        name: '异常订单',
         type: 'line',
         smooth: true,
         showSymbol: false,
         data: props.overview.trend.map((item) => item.bad),
       },
       {
-        name: '订单量',
+        name: '总订单',
         type: 'line',
         smooth: true,
         showSymbol: false,
@@ -108,7 +82,6 @@ function renderCharts() {
 }
 
 function resizeCharts() {
-  riskChart?.resize();
   trendChart?.resize();
 }
 
@@ -125,7 +98,6 @@ window.addEventListener('resize', resizeCharts);
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts);
-  riskChart?.dispose();
   trendChart?.dispose();
 });
 </script>

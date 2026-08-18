@@ -19,9 +19,7 @@ export interface StreamStepState {
 }
 
 const PHASE_LABELS: Record<string, string> = {
-  routing: '判断目标',
-  tools: '准备证据',
-  synthesis: '生成结论',
+  agent_running: 'Terra 正在运行模型与只读工具链',
   fallback: '恢复连接',
 };
 
@@ -46,6 +44,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessageState[]>([]);
   const isStreaming = ref(false);
   const streamSteps = ref<StreamStepState[]>([]);
+  const elapsedSeconds = ref(0);
   const currentHint = ref('说出要完成的业务目标，系统会自动选择证据链路。');
 
   const latestAnswer = computed(() => {
@@ -83,6 +82,11 @@ export const useChatStore = defineStore('chat', () => {
       createdAt: new Date().toISOString(),
     });
     isStreaming.value = true;
+    elapsedSeconds.value = 0;
+    const startedAt = Date.now();
+    const elapsedTimer = window.setInterval(() => {
+      elapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000);
+    }, 250);
     streamSteps.value = [];
     currentHint.value = '正在连接流式响应。';
 
@@ -126,6 +130,7 @@ export const useChatStore = defineStore('chat', () => {
       });
       currentHint.value = '请求失败，已保留输入内容。';
     } finally {
+      window.clearInterval(elapsedTimer);
       isStreaming.value = false;
     }
   }
@@ -138,6 +143,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isStreaming,
     streamSteps,
+    elapsedSeconds,
     currentHint,
     latestAnswer,
     setMode,

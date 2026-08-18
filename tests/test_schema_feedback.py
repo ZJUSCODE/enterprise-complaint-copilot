@@ -7,9 +7,16 @@ from fastapi.testclient import TestClient
 import main
 
 
+def auth_headers(client: TestClient, role: str = "analyst") -> dict[str, str]:
+    password = "Analyst@123" if role == "analyst" else "Viewer@123"
+    response = client.post("/api/auth/login", json={"username": f"{role}@example.com", "password": password})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_schema_endpoint_describes_tickets_table():
     client = TestClient(main.app)
-    response = client.get("/api/schema")
+    response = client.get("/api/schema", headers=auth_headers(client, "viewer"))
     assert response.status_code == 200
     payload = response.json()
     table = payload["tables"][0]
@@ -25,6 +32,7 @@ def test_feedback_endpoint_records_rating_event():
     request_id = f"test-{uuid.uuid4().hex}"
     response = client.post(
         "/api/feedback",
+        headers=auth_headers(client),
         json={
             "request_id": request_id,
             "session_id": "session-test",

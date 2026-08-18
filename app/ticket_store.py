@@ -29,7 +29,7 @@ TICKETS_SCHEMA = {
     "metrics": [
         {"name": "异常工单数", "expression": "COUNT(DISTINCT order_id)", "description": "命中只读条件后的异常订单数。"},
         {"name": "估算赔付总额", "expression": "ROUND(SUM(compensation_amount), 2)", "description": "命中范围内的赔付金额合计。"},
-        {"name": "平均赔付", "expression": "ROUND(AVG(compensation_amount), 2)", "description": "命中异常明细的平均赔付金额。"},
+        {"name": "平均赔付", "expression": "ROUND(SUM(compensation_amount) / COUNT(DISTINCT order_id), 2)", "description": "命中异常工单按订单聚合后的平均赔付金额。"},
     ],
     "allowed_filters": ["category", "complaint_type", "compensation_amount", "created_at", "is_bad_review", "ticket_status", "user_id", "order_id"],
     "default_scope": "is_bad_review = 1 AND ticket_status IN (1, 2, 3)",
@@ -122,46 +122,63 @@ class ReadOnlySQLiteStore:
         if filters.complaint_type:
             conditions.append("complaint_type = ?")
             params.append(filters.complaint_type)
-        if filters.amount_threshold is not None:
-            conditions.append("compensation_amount >= ?")
-            params.append(filters.amount_threshold)
         return " AND ".join(conditions), params
 
+    def _aggregate_filter(self, filters: QueryFilters) -> tuple[str, list[Any]]:
+        if filters.amount_threshold is None:
+            return "1 = 1", []
+        return "compensation_amount >= ?", [filters.amount_threshold]
+
     def build_sql_preview(self, filters: QueryFilters, limit: int = 8) -> str:
-        where_sql, params = self._where_clause(filters)
+        where_sql, base_params = self._where_clause(filters)
+        aggregate_filter, aggregate_params = self._aggregate_filter(filters)
+        params = [*base_params, *aggregate_params]
         return (
-            "SELECT order_id, user_id, category, complaint_type,\n"
-            "       ROUND(SUM(compensation_amount), 2) AS compensation_amount,\n"
-            "       ROUND(SUM(pay_amount), 2) AS pay_amount,\n"
-            "       MIN(created_at) AS created_at,\n"
-            "       MIN(comment) AS comment\n"
-            "FROM tickets\n"
-            f"WHERE {where_sql}\n"
-            "GROUP BY order_id, user_id, category, complaint_type\n"
+            "WITH grouped_tickets AS (\n"
+            "  SELECT order_id, user_id, MIN(category) AS category,\n"
+            "         MIN(complaint_type) AS complaint_type,\n"
+            "         ROUND(SUM(compensation_amount), 2) AS compensation_amount,\n"
+            "         ROUND(SUM(pay_amount), 2) AS pay_amount,\n"
+            "         MIN(created_at) AS created_at, MIN(comment) AS comment\n"
+            "  FROM tickets\n"
+            f"  WHERE {where_sql}\n"
+            "  GROUP BY order_id, user_id\n"
+            ")\n"
+            "SELECT * FROM grouped_tickets\n"
+            f"WHERE {aggregate_filter}\n"
             "ORDER BY compensation_amount DESC\n"
             f"LIMIT {limit};\n"
             f"-- params: {params}"
         )
 
     def query_ticket_details(self, filters: QueryFilters, limit: int = 8) -> dict[str, Any]:
-        where_sql, params = self._where_clause(filters)
-        detail_sql = (
-            "SELECT order_id, user_id, category, complaint_type, "
+        where_sql, base_params = self._where_clause(filters)
+        aggregate_filter, aggregate_params = self._aggregate_filter(filters)
+        params = [*base_params, *aggregate_params]
+        grouped_sql = (
+            "WITH grouped_tickets AS ("
+            "SELECT order_id, user_id, MIN(category) AS category, "
+            "MIN(complaint_type) AS complaint_type, "
             "ROUND(SUM(compensation_amount), 2) AS compensation_amount, "
             "ROUND(SUM(pay_amount), 2) AS pay_amount, "
             "MIN(created_at) AS created_at, MIN(comment) AS comment "
             "FROM tickets "
             f"WHERE {where_sql} "
-            "GROUP BY order_id, user_id, category, complaint_type "
+            "GROUP BY order_id, user_id"
+            ") "
+        )
+        detail_sql = grouped_sql + (
+            "SELECT * FROM grouped_tickets "
+            f"WHERE {aggregate_filter} "
             "ORDER BY compensation_amount DESC "
             "LIMIT ?"
         )
-        metrics_sql = (
-            "SELECT COUNT(DISTINCT order_id) AS ticket_count, "
+        metrics_sql = grouped_sql + (
+            "SELECT COUNT(*) AS ticket_count, "
             "ROUND(SUM(compensation_amount), 2) AS compensation_total, "
             "ROUND(AVG(compensation_amount), 2) AS compensation_avg "
-            "FROM tickets "
-            f"WHERE {where_sql}"
+            "FROM grouped_tickets "
+            f"WHERE {aggregate_filter}"
         )
         validate_readonly_sql(detail_sql)
         validate_readonly_sql(metrics_sql)
@@ -264,22 +281,30 @@ class MySQLReadOnlyTicketStore:
         if filters.complaint_type:
             conditions.append("complaint_type = %s")
             params.append(filters.complaint_type)
-        if filters.amount_threshold is not None:
-            conditions.append("compensation_amount >= %s")
-            params.append(filters.amount_threshold)
         return " AND ".join(conditions), params
 
+    def _aggregate_filter(self, filters: QueryFilters) -> tuple[str, list[Any]]:
+        if filters.amount_threshold is None:
+            return "1 = 1", []
+        return "compensation_amount >= %s", [filters.amount_threshold]
+
     def build_sql_preview(self, filters: QueryFilters, limit: int = 8) -> str:
-        where_sql, params = self._where_clause(filters)
+        where_sql, base_params = self._where_clause(filters)
+        aggregate_filter, aggregate_params = self._aggregate_filter(filters)
+        params = [*base_params, *aggregate_params]
         return (
-            "SELECT order_id, user_id, category, complaint_type,\n"
-            "       ROUND(SUM(compensation_amount), 2) AS compensation_amount,\n"
-            "       ROUND(SUM(pay_amount), 2) AS pay_amount,\n"
-            "       MIN(created_at) AS created_at,\n"
-            "       MIN(comment) AS comment\n"
-            "FROM tickets\n"
-            f"WHERE {where_sql}\n"
-            "GROUP BY order_id, user_id, category, complaint_type\n"
+            "WITH grouped_tickets AS (\n"
+            "  SELECT order_id, user_id, MIN(category) AS category,\n"
+            "         MIN(complaint_type) AS complaint_type,\n"
+            "         ROUND(SUM(compensation_amount), 2) AS compensation_amount,\n"
+            "         ROUND(SUM(pay_amount), 2) AS pay_amount,\n"
+            "         MIN(created_at) AS created_at, MIN(comment) AS comment\n"
+            "  FROM tickets\n"
+            f"  WHERE {where_sql}\n"
+            "  GROUP BY order_id, user_id\n"
+            ")\n"
+            "SELECT * FROM grouped_tickets\n"
+            f"WHERE {aggregate_filter}\n"
             "ORDER BY compensation_amount DESC\n"
             f"LIMIT {limit};\n"
             f"-- backend: mysql\n"
@@ -287,24 +312,33 @@ class MySQLReadOnlyTicketStore:
         )
 
     def query_ticket_details(self, filters: QueryFilters, limit: int = 8) -> dict[str, Any]:
-        where_sql, params = self._where_clause(filters)
-        detail_sql = (
-            "SELECT order_id, user_id, category, complaint_type, "
+        where_sql, base_params = self._where_clause(filters)
+        aggregate_filter, aggregate_params = self._aggregate_filter(filters)
+        params = [*base_params, *aggregate_params]
+        grouped_sql = (
+            "WITH grouped_tickets AS ("
+            "SELECT order_id, user_id, MIN(category) AS category, "
+            "MIN(complaint_type) AS complaint_type, "
             "ROUND(SUM(compensation_amount), 2) AS compensation_amount, "
             "ROUND(SUM(pay_amount), 2) AS pay_amount, "
             "MIN(created_at) AS created_at, MIN(comment) AS comment "
             "FROM tickets "
             f"WHERE {where_sql} "
-            "GROUP BY order_id, user_id, category, complaint_type "
+            "GROUP BY order_id, user_id"
+            ") "
+        )
+        detail_sql = grouped_sql + (
+            "SELECT * FROM grouped_tickets "
+            f"WHERE {aggregate_filter} "
             "ORDER BY compensation_amount DESC "
             "LIMIT %s"
         )
-        metrics_sql = (
-            "SELECT COUNT(DISTINCT order_id) AS ticket_count, "
+        metrics_sql = grouped_sql + (
+            "SELECT COUNT(*) AS ticket_count, "
             "ROUND(SUM(compensation_amount), 2) AS compensation_total, "
             "ROUND(AVG(compensation_amount), 2) AS compensation_avg "
-            "FROM tickets "
-            f"WHERE {where_sql}"
+            "FROM grouped_tickets "
+            f"WHERE {aggregate_filter}"
         )
         validate_readonly_sql(detail_sql)
         validate_readonly_sql(metrics_sql)

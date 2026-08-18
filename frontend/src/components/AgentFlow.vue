@@ -20,8 +20,6 @@
 
     <div class="flow-meta">
       <span v-if="message.latency_ms !== undefined">{{ Math.round(message.latency_ms) }} ms</span>
-      <span v-if="message.retry_count !== undefined">retry {{ message.retry_count }}</span>
-      <span v-if="message.estimated_cost_usd !== undefined">${{ Number(message.estimated_cost_usd).toFixed(6) }}</span>
     </div>
   </section>
 </template>

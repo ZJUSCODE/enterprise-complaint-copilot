@@ -13,19 +13,17 @@
           </div>
           <span v-if="message.payload.latency_ms">{{ Math.round(message.payload.latency_ms) }} ms</span>
         </div>
-        <p class="answer-summary" v-html="highlightText(cleanText(message.payload.summary))"></p>
+        <p
+          class="answer-summary"
+          v-html="highlightText(cleanText(message.payload.summary, Boolean(message.payload.table?.length)))"
+        ></p>
 
         <div v-if="message.payload.metrics?.length" class="metric-strip">
           <div v-for="metric in message.payload.metrics" :key="metric.label" class="mini-metric">
             <span>{{ metric.label }}</span>
-            <strong>{{ metric.value }}</strong>
+            <strong>{{ displayMetric(metric.label, metric.value) }}</strong>
           </div>
         </div>
-
-        <MetricsPieChart
-          v-if="(message.payload.metrics?.length ?? 0) >= 2"
-          :metrics="message.payload.metrics ?? []"
-        />
 
         <ul v-if="message.payload.highlights?.length" class="highlight-list">
           <li v-for="item in message.payload.highlights.slice(0, 4)" :key="item" v-html="highlightText(cleanText(item))"></li>
@@ -40,12 +38,17 @@
           </el-table-column>
         </el-table>
 
-        <div v-if="message.payload.table?.length" class="table-actions">
-          <button type="button" class="text-link" @click="exportTableCsv(message.payload.table, message.payload.request_id)">
+        <div v-if="message.payload.table?.length || message.payload.sql_preview" class="table-actions">
+          <button
+            v-if="message.payload.table?.length"
+            type="button"
+            class="text-link"
+            @click="exportTableCsv(message.payload.table, message.payload.request_id)"
+          >
             导出数据
           </button>
           <button v-if="message.payload.sql_preview" type="button" class="text-link" @click="emit('show-sql')">
-            查看底层 SQL 代码
+            查看底层 SQL
           </button>
         </div>
 
@@ -53,18 +56,6 @@
           request_id: {{ message.payload.request_id }}
         </div>
 
-        <div v-if="message.payload.token_usage || message.payload.estimated_cost_usd !== undefined" class="runtime-meta">
-          <span v-if="message.payload.token_usage">{{ tokenLine(message.payload.token_usage) }}</span>
-          <span v-if="message.payload.cost_breakdown">
-            embedding {{ formatCost(message.payload.cost_breakdown.embedding_cost_usd) }}
-            · prompt {{ formatCost(message.payload.cost_breakdown.prompt_cost_usd) }}
-            · completion {{ formatCost(message.payload.cost_breakdown.completion_cost_usd) }}
-          </span>
-          <span v-else-if="message.payload.estimated_cost_usd !== undefined">
-            cost {{ formatCost(message.payload.estimated_cost_usd) }}
-          </span>
-          <span v-if="message.payload.retry_count !== undefined">retry {{ message.payload.retry_count }}</span>
-        </div>
       </template>
     </div>
   </article>
@@ -72,9 +63,8 @@
 
 <script setup lang="ts">
 import type { ChatMessageState } from '@/stores/chat';
-import type { TicketRow, TokenUsage } from '@/types/api';
+import type { TicketRow } from '@/types/api';
 import { formatMoney, workflowLabel } from '@/utils/format';
-import MetricsPieChart from '@/components/MetricsPieChart.vue';
 
 defineProps<{
   message: ChatMessageState;
@@ -82,20 +72,11 @@ defineProps<{
 
 const emit = defineEmits<{ (e: 'show-sql'): void }>();
 
-function tokenLine(usage: TokenUsage) {
-  const parts = [
-    `total ${usage.total_tokens}`,
-    `prompt ${usage.prompt_tokens}`,
-    `completion ${usage.completion_tokens}`,
-  ];
-  if (usage.embedding_tokens !== undefined) {
-    parts.splice(1, 0, `embedding ${usage.embedding_tokens}`);
-  }
-  return `tokens ${parts.join(' / ')}`;
-}
-
-function formatCost(value?: number) {
-  return `$${Number(value || 0).toFixed(6)}`;
+function displayMetric(label: string, value: string | number) {
+  if (typeof value !== 'number') return value;
+  if (label.includes('金额') || label.includes('赔付') || label.includes('实付')) return formatMoney(value);
+  if (label.includes('工单') || label.includes('订单') || label.includes('触发')) return `${value} 单`;
+  return value;
 }
 
 function escapeHtml(value: string): string {
@@ -107,11 +88,22 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function cleanText(value?: string) {
-  return escapeHtml(String(value || ''))
+function cleanText(value?: string, stripMarkdownTables = false) {
+  const lines = String(value || '').split('\n');
+  const normalized = (stripMarkdownTables
+    ? lines.filter((line) => {
+        const trimmed = line.trim();
+        return !(trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.split('|').length >= 4);
+      })
+    : lines
+  ).join('\n');
+
+  return escapeHtml(normalized)
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
-    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/^\s*#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '• ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 

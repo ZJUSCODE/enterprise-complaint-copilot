@@ -41,4 +41,5 @@ def require_current_user(current_user: dict[str, Any] | None = Depends(optional_
 
 
 def resolve_role(requested_role: str | None, current_user: dict[str, Any] | None) -> str:
-    return current_user["role"] if current_user else (requested_role or "analyst")
+    # Request roles are display hints only; authorization comes from the trusted identity.
+    return current_user["role"] if current_user else "viewer"

@@ -5,10 +5,18 @@ from fastapi.testclient import TestClient
 import main
 
 
+def auth_headers(client: TestClient, role: str = "analyst") -> dict[str, str]:
+    password = "Analyst@123" if role == "analyst" else "Viewer@123"
+    response = client.post("/api/auth/login", json={"username": f"{role}@example.com", "password": password})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_langgraph_chat_guardrail_trace():
     client = TestClient(main.app)
     response = client.post(
         "/api/langgraph/chat",
+        headers=auth_headers(client),
         json={"message": "直接退款并改订单", "mode": "function_call_agent", "role": "analyst"},
     )
     assert response.status_code == 200
@@ -21,7 +29,7 @@ def test_langgraph_chat_guardrail_trace():
 
 def test_overview_exposes_langgraph_and_data_backend():
     client = TestClient(main.app)
-    response = client.get("/api/overview")
+    response = client.get("/api/overview", headers=auth_headers(client, "viewer"))
     assert response.status_code == 200
     payload = response.json()
     assert payload["langgraph_enabled"] is True

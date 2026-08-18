@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -9,15 +10,30 @@ from typing import Any
 import chromadb
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI
 
 from app.config import Settings, KB_DIR, VECTOR_DIR
 from app.utils import (
     estimate_cost_breakdown,
     estimate_text_tokens,
+    extract_usage,
     extract_langchain_usage,
     lexical_overlap_score,
     summarize_text,
 )
+
+
+VECTOR_MANIFEST = "kb_manifest.json"
+
+
+def knowledge_base_hash(kb_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted([kb_dir / "policies.json", *kb_dir.glob("*.md")]):
+        if not path.exists() or path.name.lower().startswith("readme"):
+            continue
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _load_and_chunk_markdown_docs(kb_dir: Path) -> tuple[list[str], list[dict], list[str]]:
@@ -74,6 +90,8 @@ class PolicyKnowledgeBase:
         query_lower = query.lower()
         scored: list[tuple[float, dict[str, Any]]] = []
         for doc in self.documents:
+            if category and doc["category"] not in {category, "通用"}:
+                continue
             score = 0.0
             if category and (doc["category"] == category or doc["category"] == "通用"):
                 score += 4
@@ -101,9 +119,11 @@ class LangChainRAGService:
         self.collection: Any | None = None
         self.embeddings: OpenAIEmbeddings | None = None
         self.llm: ChatOpenAI | None = None
+        self.generation_client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url) if settings.llm_api_key else None
+        self.generation_available = self.generation_client is not None
 
         if not settings.use_langchain_rag or not settings.embedding_api_key or not settings.llm_api_key:
-            self.error = "缺少 LLM 或 Embedding 配置，LangChain RAG 未启用。"
+            self.error = "向量 Embedding 未启用；当前使用本地词法检索 + 大模型生成。"
             return
         try:
             if not VECTOR_DIR.exists() and not settings.auto_build_vector_store:
@@ -113,6 +133,20 @@ class LangChainRAGService:
             self.client = chromadb.PersistentClient(path=str(VECTOR_DIR))
             self.collection = self.client.get_or_create_collection(name="policy_docs")
             existing = self.collection.get()
+            manifest_path = VECTOR_DIR / VECTOR_MANIFEST
+            expected_hash = knowledge_base_hash(KB_DIR)
+            manifest_hash = None
+            if manifest_path.exists():
+                try:
+                    manifest_hash = json.loads(manifest_path.read_text(encoding="utf-8")).get("knowledge_base_hash")
+                except (OSError, json.JSONDecodeError):
+                    manifest_hash = None
+            if existing["ids"] and manifest_hash != expected_hash:
+                if not settings.auto_build_vector_store:
+                    self.error = "向量索引已过期。请运行 scripts/build_openai_vector_store.py --rebuild；当前使用最新知识库的本地检索。"
+                    return
+                self.collection.delete(ids=existing["ids"])
+                existing = {"ids": []}
             if not existing["ids"]:
                 if not settings.auto_build_vector_store:
                     self.error = "向量库为空。请运行 scripts/build_openai_vector_store.py 构建；当前使用本地规则检索。"
@@ -128,6 +162,7 @@ class LangChainRAGService:
                 ids.extend(md_ids)
                 vectors = self.embeddings.embed_documents(texts)
                 self.collection.add(ids=ids, documents=texts, metadatas=metadatas, embeddings=vectors)
+                manifest_path.write_text(json.dumps({"knowledge_base_hash": expected_hash}, ensure_ascii=False, indent=2), encoding="utf-8")
             self.llm = ChatOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url, model=settings.llm_model, temperature=0)
             self.available = True
         except Exception as exc:
@@ -151,35 +186,65 @@ class LangChainRAGService:
                     "rerank_score": round(lexical_overlap_score(question, f"{doc.get('title', '')} {doc.get('excerpt', '')}"), 4),
                     "source": "lexical_fallback",
                 })
-            if docs:
-                top_doc = docs[0]
-                guidance = "；".join(top_doc.get("guidance", [])[:3])
-                answer = f"基于 {top_doc['citation']}，建议先按以下口径处理：{guidance}"
+            context = "\n\n".join(
+                f"[{doc['citation']}] {doc['title']}\n{doc['excerpt']}\n处理指引：{'；'.join(doc.get('guidance', []))}"
+                for doc in docs
+            ) or "未检索到明确条款"
+            prompt = (
+                "你是企业级售后客诉 Copilot。只允许依据给定 SOP 证据回答，不得编造规则或承诺执行退款。"
+                "请先给明确结论，再给依据和下一步；证据不足时明确建议人工复核。"
+                "回答最多 6 句话，禁止输出 Markdown 表格、代码块或逐行复述订单明细。\n\n"
+                f"问题：{question}\n\nSOP 证据：\n{context}"
+            )
+            generation_start = time.perf_counter()
+            model_trace: list[dict[str, Any]] = []
+            generation_error: str | None = None
+            if self.generation_client:
+                try:
+                    response = self.generation_client.chat.completions.create(
+                        model=self.settings.llm_model,
+                        temperature=0,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    answer = response.choices[0].message.content or "模型未返回有效内容，建议转人工复核。"
+                    token_usage = {"embedding_tokens": 0, **extract_usage(response)}
+                    model_trace.append({"stage": "rag_synthesis", "model": self.settings.llm_model, "provider": "openai_compatible"})
+                except Exception as exc:
+                    generation_error = str(exc)
+                    answer = "模型生成失败，已保留检索证据，建议转人工复核。"
+                    estimated = estimate_text_tokens(answer)
+                    token_usage = {"embedding_tokens": 0, "prompt_tokens": 0, "completion_tokens": estimated, "total_tokens": estimated}
             else:
-                answer = "LangChain RAG 当前未启用，且本地规则检索未命中明确条款，建议转人工复核。"
-            token_usage = {
-                "embedding_tokens": 0,
-                "prompt_tokens": 0,
-                "completion_tokens": estimate_text_tokens(answer),
-                "total_tokens": estimate_text_tokens(answer),
-            }
+                answer = "未配置语言模型，已保留检索证据，建议转人工复核。"
+                estimated = estimate_text_tokens(answer)
+                token_usage = {"embedding_tokens": 0, "prompt_tokens": 0, "completion_tokens": estimated, "total_tokens": estimated}
+            generation_ms = round((time.perf_counter() - generation_start) * 1000, 2)
             return {
                 "available": False,
                 "answer": answer,
                 "sources": fallback_sources,
-                "fallback_reason": self.error or "未初始化",
+                "fallback_reason": generation_error,
+                "retrieval_mode": "lexical",
+                "generation_mode": "llm" if model_trace else "deterministic_fallback",
                 "retrieval_ms": retrieval_ms,
                 "embedding_ms": 0,
-                "generation_ms": 0,
+                "generation_ms": generation_ms,
                 "total_ms": round((time.perf_counter() - start) * 1000, 2),
                 "token_usage": token_usage,
                 "cost_breakdown": estimate_cost_breakdown(self.settings, token_usage),
+                "model_trace": model_trace,
             }
         embedding_start = time.perf_counter()
         query_vector = self.embeddings.embed_query(question)
         embedding_ms = round((time.perf_counter() - embedding_start) * 1000, 2)
         retrieval_start = time.perf_counter()
-        result = self.collection.query(query_embeddings=[query_vector], n_results=max(top_k * 2, 6))
+        query_kwargs: dict[str, Any] = {
+            "query_embeddings": [query_vector],
+            "n_results": max(top_k * 2, 6),
+        }
+        if category:
+            query_kwargs["where"] = {"$or": [{"category": category}, {"category": "通用"}]}
+        result = self.collection.query(**query_kwargs)
         retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
         matched = []
         distances = result.get("distances", [[]])[0] if result.get("distances") else []
@@ -230,4 +295,7 @@ class LangChainRAGService:
             "total_ms": round((time.perf_counter() - start) * 1000, 2),
             "token_usage": token_usage,
             "cost_breakdown": estimate_cost_breakdown(self.settings, token_usage),
+            "retrieval_mode": "vector",
+            "generation_mode": "llm" if self.llm else "deterministic_fallback",
+            "model_trace": [{"stage": "rag_synthesis", "model": self.settings.llm_model, "provider": "openai_compatible"}] if self.llm else [],
         }

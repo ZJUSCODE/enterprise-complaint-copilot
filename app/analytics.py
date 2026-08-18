@@ -76,10 +76,44 @@ class LocalAnalyticsEngine:
         compensation_factor = min((row["compensation_total"] or 0) / 200.0, 1.0)
         return clamp(0.18 * spend_factor + 0.42 * complaint_factor + 0.16 * frequency_factor + 0.24 * compensation_factor, 0.02, 0.98)
 
+    def _daily_order_counts(self) -> tuple[pd.DataFrame, pd.Timestamp | None]:
+        dated_df = self.dataset.dropna(subset=["order_purchase_timestamp"]).copy()
+        if dated_df.empty:
+            return pd.DataFrame(columns=["bad", "total"]), None
+        dated_df["trend_date"] = dated_df["order_purchase_timestamp"].dt.normalize()
+        dated_df["bad_order_id"] = dated_df["order_id"].where(dated_df["is_bad_review"] == 1)
+        daily = dated_df.groupby("trend_date").agg(
+            bad=("bad_order_id", "nunique"),
+            total=("order_id", "nunique"),
+        )
+        latest_day = dated_df["trend_date"].max()
+        calendar = pd.date_range(start=daily.index.min(), end=latest_day, freq="D")
+        return daily.reindex(calendar, fill_value=0), latest_day
+
+    @staticmethod
+    def _select_complete_window(daily: pd.DataFrame, days: int = 30) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+        if daily.empty:
+            return None, None
+        fallback_end = daily.index[-1]
+        for window_end in reversed(daily.index[days - 1:]):
+            window_start = window_end - pd.Timedelta(days=days - 1)
+            window = daily.loc[window_start:window_end]
+            median_orders = max(float(window["total"].median()), 1.0)
+            if len(window) == days and float(window["total"].min()) >= median_orders * 0.2:
+                return window_start, window_end
+        return fallback_end - pd.Timedelta(days=days - 1), fallback_end
+
     def get_overview(self) -> dict[str, Any]:
         high_risk = self.user_summary[self.user_summary["risk_level"] == "高风险"]
-        trend_df = self.dataset.dropna(subset=["order_purchase_timestamp"]).groupby(self.dataset["order_purchase_timestamp"].dt.to_period("D")).agg(bad=("is_bad_review", "sum"), total=("order_id", "nunique")).reset_index().tail(30)
-        trend = [{"date": str(row["order_purchase_timestamp"]), "bad": int(row["bad"]), "total": int(row["total"])} for _, row in trend_df.iterrows()]
+        daily, latest_day = self._daily_order_counts()
+        trend_start, trend_end = self._select_complete_window(daily)
+        trend: list[dict[str, Any]] = []
+        if trend_start is not None and trend_end is not None:
+            trend_df = daily.loc[trend_start:trend_end]
+            trend = [
+                {"date": day.strftime("%Y-%m-%d"), "bad": int(row["bad"]), "total": int(row["total"])}
+                for day, row in trend_df.iterrows()
+            ]
 
         token_counter: dict[str, int] = {}
         stopwords = {"para", "com", "que", "não", "nao", "foi", "uma", "produto", "muito", "mais", "sem", "isso", "the", "and"}
@@ -90,7 +124,6 @@ class LocalAnalyticsEngine:
         top_keywords = [{"word": word, "count": count} for word, count in sorted(token_counter.items(), key=lambda item: item[1], reverse=True)[:8]]
 
         complaint_mix_df = self.dataset[self.dataset["is_bad_review"] == 1].groupby("complaint_type").agg(count=("order_id", "nunique")).reset_index().sort_values("count", ascending=False)
-        latest_dt = self.dataset["order_purchase_timestamp"].max()
         return {
             "risk_rate": round(len(high_risk) / max(len(self.user_summary), 1), 4),
             "high_risk_cnt": int(len(high_risk)),
@@ -98,7 +131,9 @@ class LocalAnalyticsEngine:
             "trend": trend,
             "top_keywords": top_keywords,
             "complaint_mix": [{"label": row["complaint_type"], "value": int(row["count"])} for _, row in complaint_mix_df.iterrows()],
-            "latest_snapshot": latest_dt.strftime("%Y-%m-%d") if pd.notna(latest_dt) else "无数据",
+            "latest_snapshot": latest_day.strftime("%Y-%m-%d") if latest_day is not None else "无数据",
+            "trend_window_start": trend_start.strftime("%Y-%m-%d") if trend_start is not None else None,
+            "trend_window_end": trend_end.strftime("%Y-%m-%d") if trend_end is not None else None,
         }
 
     def get_daily_risk_report(self, report_date: str | None = None) -> dict[str, Any]:
@@ -111,13 +146,14 @@ class LocalAnalyticsEngine:
                 "headline": "当前没有可生成日报的数据。",
                 "metrics": [],
                 "top_risks": [],
-                "recommended_actions": ["确认 Olist 样本数据是否已加载。"],
+                "recommended_actions": ["确认合成演示数据是否已生成。"],
                 "delivery_mock": {"channel": "Feishu/WeCom", "status": "mock_not_sent"},
                 "markdown": "当前没有可生成日报的数据。",
             }
 
         df["report_date"] = df["order_purchase_timestamp"].dt.strftime("%Y-%m-%d")
-        normalized_date = report_date or str(df["report_date"].max())
+        _, trend_end = self._select_complete_window(self._daily_order_counts()[0])
+        normalized_date = report_date or (trend_end.strftime("%Y-%m-%d") if trend_end is not None else str(df["report_date"].max()))
         day_df = df[df["report_date"] == normalized_date]
         if day_df.empty:
             normalized_date = str(df["report_date"].max())

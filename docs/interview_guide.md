@@ -4,7 +4,7 @@
 
 ## 30 秒介绍
 
-> 我做了一个企业级智能客诉 Copilot，面向客服主管和运营分析场景。用户可以用自然语言查询异常退款、订单物流、售后 SOP 和用户风险。系统通过 Auto Router 判断该走 Function Calling、RAG，还是 SQL + RAG 复合链路；数据查询由 Tool Registry 统一登记的只读工具完成，政策回答由 LangChain RAG 返回引用来源和分数。为了避免 Agent 越权，我加了 JWT/RBAC、Guardrail、只读 SQL 校验、审计日志和人工复核队列。前端用 Vue3 做成目标优先的工作台，并补了 token/cost 追踪、50 case eval、pytest、Playwright E2E、GitHub Actions CI、Docker 和 demo GIF。
+> 我做了一个企业级智能客诉 Copilot，面向客服主管和运营分析场景。用户可以用自然语言查询异常退款、订单物流、售后 SOP 和用户风险。系统通过 Auto Router 判断该走 Function Calling、RAG，还是 SQL + RAG 复合链路；数据查询由 Tool Registry 统一登记的只读工具完成，政策回答由 LangChain RAG 返回引用来源和分数。为了避免 Agent 越权，我加了 JWT/RBAC、Guardrail、只读 SQL 校验、审计日志和人工复核队列。前端用 Vue3 做成目标优先的工作台，并补了 token/cost 追踪、57 case eval、pytest、Playwright E2E、GitHub Actions CI、Docker 和 demo GIF。
 
 ## 2 分钟展开
 
@@ -60,7 +60,7 @@
 | --- | --- |
 | `app/runtime.py` | 核心后端，包含 API、Router、Agent、RAG、SQL、安全、审计、复核 |
 | `eval/agent_eval_cases.json` | route、tool、guardrail、多轮上下文评测集 |
-| `eval/v2_eval_report.md` | 50 case 评测摘要报告 |
+| `eval/v2_eval_report.md` | 57 case 评测摘要报告 |
 | `frontend/src/views/HomeView.vue` | 今日优先级页面，用户先看到最该处理的风险 |
 | `frontend/src/views/CopilotView.vue` | 处理工作台，用户说目标，系统自动选择证据链路 |
 | `frontend/src/components/EvidenceRail.vue` | 证据栏，展示 SOP、SQL、trace、token 和 cost |
@@ -106,9 +106,27 @@ supervisor@example.com / Supervisor@123
 4. 展示 SQL preview、异常明细、SOP 引用、Agent 执行链路、运行成本。
 5. 输入“直接退款并改订单”，展示 Guardrail 拦截和复核单。
 6. 进入审计中心，展示 request_id、route、tool trace、latency、token/cost。
-7. 进入评测报告，展示 50 case route/tool/RAG/Guardrail/memory 指标。
+7. 进入评测报告，展示 57 case route/tool/RAG/Guardrail/memory 指标。
 8. 切换 supervisor，进入复核中心处理 case。
 9. 展示 `output/playwright/copilot-demo.gif`、`eval/v2_eval_report.md`，或运行 `npm run test:e2e`。
+
+自动化发布门禁默认运行可重复的本地 fallback，不调用外部 Terra，也不能作为生产模型效果证明：
+
+```bash
+npm run test:e2e
+```
+
+真实 Terra 验证必须显式提供模型凭据；缺少 key 时 Playwright 会直接失败，不会静默降级后冒充真实结果：
+
+```bash
+E2E_TERRA_MODE=external LLM_API_KEY="$LLM_API_KEY" npm run test:e2e
+```
+
+也可以对已经启动的真实环境运行浏览器门禁，此时 Playwright 不会启动本地 fallback 服务：
+
+```bash
+E2E_BASE_URL="https://copilot.example.com" npm run test:e2e
+```
 
 ## 常见追问
 
@@ -173,7 +191,7 @@ LangGraph 把 permission、guardrail、router、execute、review、audit 这些�
 - 实现 SQLite/MySQL 只读查询层与 SQL 安全校验，禁止模型直接执行任意 SQL，工具层通过参数化查询返回结构化指标、明细、SQL preview 和 Tool Trace。
 - 构建 SOP RAG 与复合推理链路，基于 citation、retrieval score、rerank score 和明细摘要生成可追溯回答，并修正“规则未覆盖时不能编造统一复核条件”的输出逻辑。
 - 建立 Agent 治理能力，包括 Guardrail、高危请求拦截、human-in-the-loop 复核队列、反馈事件、审计日志、trace_id、retry_count、token usage 和 cost breakdown。
-- 搭建工程化验收体系，使用 pytest、Playwright 单端口生产验收、Vue 工作台 E2E、移动端 E2E、50 case eval、GitHub Actions CI、Docker build 和自动截图/GIF 脚本覆盖核心演示路径。
+- 搭建工程化验收体系，使用 pytest、Playwright 单端口生产验收、Vue 工作台 E2E、移动端 E2E、57 case eval、GitHub Actions CI、Docker build 和自动截图/GIF 脚本覆盖核心演示路径。
 ```
 
 ## 最稳的收尾

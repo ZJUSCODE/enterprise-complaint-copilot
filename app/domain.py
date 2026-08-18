@@ -34,7 +34,11 @@ COMPLAINT_PATTERNS = {
     "仅退款": ["refund", "reembolso", "devol", "cancel", "troca", "退款"],
 }
 
-MUTATION_PATTERNS = ["update", "delete", "insert", "drop", "truncate", "删除", "清空", "审批", "批了", "通过退款", "改订单", "直接退款"]
+MUTATION_PATTERNS = [
+    "update", "delete", "insert", "drop", "truncate", "删除", "清空", "审批", "批了",
+    "通过退款", "改订单", "直接退款", "退款额度调到", "调整退款额度", "修改退款额度",
+    "工单的优先级设为", "工单优先级设为", "设置工单优先级", "调整工单优先级",
+]
 PROMPT_INJECTION_PATTERNS = [
     "忽略规则",
     "忽略上面的规则",

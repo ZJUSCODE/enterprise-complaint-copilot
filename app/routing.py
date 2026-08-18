@@ -7,7 +7,7 @@ from openai import OpenAI
 
 from app.config import Settings
 from app.domain import POLICY_PATTERNS, contains_any
-from app.utils import safe_json_loads
+from app.utils import extract_usage, safe_json_loads
 
 
 class AutoRouter:
@@ -30,29 +30,34 @@ class AutoRouter:
             return {"mode": "function_call_agent", "reason": "命中退款、明细、风险或统计查询规则。", "confidence": 0.82, "source": "rule"}
         return None
 
-    def _llm_route(self, message: str) -> dict[str, Any] | None:
+    def _llm_route(self, message: str, rule_hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
         if not self.client:
             return None
         response = self.client.chat.completions.create(
             model=self.settings.llm_model,
             temperature=0,
             messages=[
-                {"role": "system", "content": "你是企业内 Copilot 的路由器。请在 function_call_agent、langchain_rag、sql_rag_chain 之间三选一，并输出 JSON。"},
-                {"role": "user", "content": message},
+                {"role": "system", "content": "你是企业内 Copilot 的路由器。请在 function_call_agent、langchain_rag、sql_rag_chain 之间三选一。只输出 JSON，字段为 mode、reason、confidence。"},
+                {"role": "user", "content": f"问题：{message}\n规则初判：{rule_hint or '无'}\n请独立确认最终路由。"},
             ],
         )
         parsed = safe_json_loads(response.choices[0].message.content or "{}")
         mode = parsed.get("mode")
         if mode not in {"function_call_agent", "langchain_rag", "sql_rag_chain"}:
             return None
-        return {"mode": mode, "reason": parsed.get("reason", "LLM classifier 给出了路由决策。"), "confidence": float(parsed.get("confidence", 0.65)), "source": "llm_classifier"}
+        return {
+            "mode": mode,
+            "reason": parsed.get("reason", "LLM classifier 给出了路由决策。"),
+            "confidence": float(parsed.get("confidence", 0.65)),
+            "source": "llm_classifier",
+            "_token_usage": extract_usage(response),
+            "model_trace": [{"stage": "intent_routing", "model": self.settings.llm_model, "provider": "openai_compatible"}],
+        }
 
     def route(self, message: str) -> dict[str, Any]:
         rule_decision = self._rule_route(message)
-        if rule_decision and rule_decision["confidence"] >= 0.8:
-            return rule_decision
         try:
-            llm_decision = self._llm_route(message)
+            llm_decision = self._llm_route(message, rule_hint=rule_decision)
             if llm_decision:
                 return llm_decision
         except Exception:

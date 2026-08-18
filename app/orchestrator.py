@@ -16,6 +16,7 @@ from app.routing import AutoRouter
 from app.stores import RedisRuntime, SessionMemoryStore
 from app.ticket_store import QueryFilters, ReadOnlySQLiteStore
 from app.utils import (
+    add_token_usage,
     estimate_cost,
     estimate_cost_breakdown,
     summarize_text,
@@ -84,6 +85,7 @@ class Orchestrator:
             "trace_id": trace_id,
             "latency_ms": latency_ms,
             "tool_call_count": len(response.get("tool_trace", []) or []),
+            "model_call_count": len(response.get("model_trace", []) or []),
             "rag_retrieval_ms": max([float(item.get("duration_ms", 0) or 0) for item in response.get("tool_trace", []) or [] if "rag" in str(item.get("tool", "")).lower()] or [0]),
             "token_usage": token_usage,
             "cost_breakdown": cost_breakdown,
@@ -137,7 +139,20 @@ class Orchestrator:
 
     def _respond_sql_rag_chain(self, message: str, session_id: str | None = None) -> dict[str, Any]:
         sid = self.memory.get_or_create(session_id)
-        sql_args = self.function_agent._validate_tool_args("query_refund_cases", {"query": message})
+        query_plan = self.function_agent.plan_refund_query(message)
+        if query_plan.get("unsupported_reason"):
+            return {
+                "mode": "sql_rag_chain",
+                "title": "查询能力边界",
+                "summary": f"无法按原问题执行：{query_plan['unsupported_reason']} 请改问具体类目、客诉类型或赔付金额阈值。",
+                "session_id": sid,
+                "highlights": ["未生成近似 SQL，也未丢弃原问题中的分组条件。"],
+                "tool_trace": [],
+                "error": {"code": "unsupported_query_shape", "message": query_plan["unsupported_reason"]},
+                "_token_usage": query_plan.get("token_usage", {}),
+                "degradation_path": "unsupported_query_shape",
+            }
+        sql_args = query_plan["arguments"]
         sql_result, sql_duration_ms = timed_call(self.sql_store.query_ticket_details, QueryFilters(
             category=sql_args.get("category"),
             complaint_type=sql_args.get("complaint_type"),
@@ -183,7 +198,8 @@ class Orchestrator:
             },
         ]
         rag_token_usage = rag_result.get("token_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
-        rag_cost_breakdown = rag_result.get("cost_breakdown") or estimate_cost_breakdown(self.settings, rag_token_usage)
+        total_token_usage = add_token_usage(query_plan.get("token_usage", {}), rag_token_usage)
+        rag_cost_breakdown = estimate_cost_breakdown(self.settings, total_token_usage)
         max_compensation = max([float(row.get("compensation_amount") or 0) for row in sql_result.get("rows", [])] or [0.0])
         rag_answer = rag_result.get("answer", "")
         rows = sql_result.get("rows", [])
@@ -204,7 +220,7 @@ class Orchestrator:
         avg_compensation = metrics.get("平均赔付", 0)
         total_compensation = metrics.get("估算赔付总额", 0)
         summary_parts = [
-            f"结论：这批命中明细需要进入人工复核，但不能简单归因为“质量问题退款超过 {sql_args.get('amount_threshold') or 100:g} 元就必须主管复核”。",
+            rag_answer,
             f"SQL 已命中 {count} 条{sql_args.get('complaint_type') or ''}异常，估算赔付合计 {total_compensation} 元，平均赔付 {avg_compensation} 元，最高赔付 {round(max_compensation, 2)} 元。",
         ]
         if unified_rule_missing:
@@ -235,8 +251,10 @@ class Orchestrator:
             "tool_trace": tool_trace,
             "review_required": needs_review,
             "review_reason": "SQL 命中高赔付质量问题异常，但 SOP 未提供按金额统一复核的明确条款，需人工按类目与风险补判。",
-            "_token_usage": rag_token_usage,
+            "_token_usage": total_token_usage,
             "_cost_breakdown": rag_cost_breakdown,
+            "model_trace": [*query_plan.get("model_trace", []), *rag_result.get("model_trace", [])],
+            "degradation_path": query_plan.get("fallback_reason") or rag_result.get("fallback_reason"),
         }
 
     def _respond_impl(self, message: str, mode: str, session_id: str | None = None) -> dict[str, Any]:
@@ -267,6 +285,7 @@ class Orchestrator:
                     },
                 }],
                 "degradation_path": result.get("fallback_reason"),
+                "model_trace": result.get("model_trace", []),
                 "_token_usage": result.get("token_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
                 "_cost_breakdown": result.get("cost_breakdown"),
             }
@@ -275,10 +294,12 @@ class Orchestrator:
         if mode in {"router_demo", "auto"}:
             decision = self.router.route(message)
             delegated = self._respond_impl(message, decision["mode"], session_id=session_id)
+            delegated["_token_usage"] = add_token_usage(delegated.get("_token_usage", {}), decision.get("_token_usage", {}))
+            delegated["model_trace"] = [*decision.get("model_trace", []), *delegated.get("model_trace", [])]
             delegated["mode"] = mode
             delegated["title"] = "Router Demo" if mode == "router_demo" else delegated.get("title", "Auto Router")
             delegated.setdefault("highlights", [])
             delegated["highlights"] = [f"路由结果：{decision['mode']}", f"路由来源：{decision['source']}", f"路由置信度：{decision['confidence']:.2f}", f"路由原因：{decision['reason']}", *delegated["highlights"]]
-            delegated["route"] = decision
+            delegated["route"] = {key: value for key, value in decision.items() if not key.startswith("_") and key != "model_trace"}
             return delegated
         return self.function_agent.respond(message, session_id=session_id)

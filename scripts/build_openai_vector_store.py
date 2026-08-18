@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -16,6 +17,17 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 KB_PATH = BASE_DIR / "knowledge_base" / "policies.json"
 KB_DIR = BASE_DIR / "knowledge_base"
 VECTOR_DIR = BASE_DIR / "chroma_openai"
+VECTOR_MANIFEST = "kb_manifest.json"
+
+
+def knowledge_base_hash(kb_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted([kb_dir / "policies.json", *kb_dir.glob("*.md")]):
+        if not path.exists() or path.name.lower().startswith("readme"):
+            continue
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def load_dotenv_file(path: Path) -> None:
@@ -141,6 +153,10 @@ def main() -> None:
     if existing.get("ids"):
         collection.delete(ids=existing["ids"])
     collection.add(ids=all_ids, documents=all_texts, metadatas=all_metadatas, embeddings=vectors)
+    (VECTOR_DIR / VECTOR_MANIFEST).write_text(
+        json.dumps({"knowledge_base_hash": knowledge_base_hash(KB_DIR)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     print(f"Built vector store at {VECTOR_DIR} ({len(all_texts)} vectors)")
 
 

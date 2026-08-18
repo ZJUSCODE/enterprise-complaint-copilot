@@ -43,6 +43,23 @@ class AuditLogStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_events(created_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_request ON audit_events(request_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS action_audit_events (
+                    event_id TEXT PRIMARY KEY,
+                    actor_user_id TEXT NOT NULL,
+                    actor_role TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT,
+                    before_state_json TEXT NOT NULL,
+                    after_state_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_action_audit_created_at ON action_audit_events(created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_action_audit_actor ON action_audit_events(actor_user_id, created_at)")
             columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_events)").fetchall()}
             if "blocked_by_permission" not in columns:
                 conn.execute("ALTER TABLE audit_events ADD COLUMN blocked_by_permission INTEGER NOT NULL DEFAULT 0")
@@ -57,6 +74,63 @@ class AuditLogStore:
             if "retry_count" not in columns:
                 conn.execute("ALTER TABLE audit_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
             conn.commit()
+
+    def record_action(self, event: dict[str, Any]) -> dict[str, Any]:
+        event_id = event.get("event_id") or f"ACT-{uuid.uuid4().hex[:16].upper()}"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute(
+                """
+                INSERT INTO action_audit_events (
+                    event_id, actor_user_id, actor_role, action, target_type,
+                    target_id, before_state_json, after_state_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    event["actor_user_id"],
+                    event["actor_role"],
+                    event["action"],
+                    event["target_type"],
+                    event.get("target_id"),
+                    json.dumps(event.get("before_state") or {}, ensure_ascii=False),
+                    json.dumps(event.get("after_state") or {}, ensure_ascii=False),
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT event_id, actor_user_id, actor_role, action, target_type,
+                       target_id, before_state_json, after_state_json, created_at
+                FROM action_audit_events
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+            conn.commit()
+        return self._deserialize_action_row(row)
+
+    def recent_actions(self, limit: int = 20) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT event_id, actor_user_id, actor_role, action, target_type,
+                       target_id, before_state_json, after_state_json, created_at
+                FROM action_audit_events
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._deserialize_action_row(row) for row in rows]
+
+    @staticmethod
+    def _deserialize_action_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["before_state"] = json.loads(item.pop("before_state_json") or "{}")
+        item["after_state"] = json.loads(item.pop("after_state_json") or "{}")
+        return item
 
     def record(self, event: dict[str, Any]) -> None:
         route = event.get("route") or {}
@@ -219,6 +293,25 @@ class HumanReviewQueue:
             item["tool_trace"] = json.loads(item.pop("tool_trace_json") or "[]")
             items.append(item)
         return items
+
+    def get(self, case_id: str) -> dict[str, Any] | None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT case_id, request_id, session_id, user_role, source_mode, reason,
+                       user_message, response_summary, tool_trace_json, case_priority, escalation_reason, assignee, status,
+                       reviewer_note, created_at, updated_at
+                FROM human_review_queue
+                WHERE case_id = ?
+                """,
+                (case_id,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["tool_trace"] = json.loads(item.pop("tool_trace_json") or "[]")
+        return item
 
     def update_status(self, case_id: str, status: str, reviewer_note: str | None = None, assignee: str | None = None, case_priority: str | None = None) -> dict[str, Any] | None:
         with sqlite3.connect(self.db_path) as conn:

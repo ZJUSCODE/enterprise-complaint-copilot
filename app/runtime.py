@@ -167,7 +167,8 @@ def overview(current_user: dict[str, Any] | None = Depends(optional_current_user
         return {
             **runtime.analytics.get_overview(),
             "api_configured": bool(runtime.settings.llm_api_key),
-            "langchain_rag_enabled": runtime.orchestrator.langchain_rag.available,
+            "langchain_rag_enabled": runtime.orchestrator.langchain_rag.generation_available,
+            "rag_retrieval_mode": "vector" if runtime.orchestrator.langchain_rag.available else "lexical",
             "llm_model": runtime.settings.llm_model,
             "rag_status": runtime.orchestrator.langchain_rag.error or "ready",
             "data_query_backend": getattr(runtime.sql_store, "backend_name", runtime.settings.data_query_backend),
@@ -192,7 +193,7 @@ def daily_risk_report(date: str | None = None, current_user: dict[str, Any] | No
 
 @app.get("/api/sample-questions")
 def sample_questions(current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
-    return {"items": [{"mode": "function_call_agent", "text": "查一下质量问题退款超过100元的明细"}, {"mode": "sql_rag_chain", "text": "质量问题退款超过100元的明细，按 SOP 是否需要主管复核"}, {"mode": "function_call_agent", "text": "生鲜延误坏了，运费和货款怎么赔"}, {"mode": "router_demo", "text": "退货最多的类目，按规定能不能不退"}, {"mode": "function_call_agent", "text": "用户 9ef432eb6251297304e76186b10a928d 的风险分是多少"}, {"mode": "langchain_rag", "text": "3C 数码拆封后出现质量问题，应该怎么处理"}]}
+    return {"items": [{"mode": "function_call_agent", "text": "查一下质量问题退款超过100元的明细"}, {"mode": "sql_rag_chain", "text": "质量问题退款超过100元的明细，按 SOP 是否需要主管复核"}, {"mode": "function_call_agent", "text": "生鲜延误坏了，运费和货款怎么赔"}, {"mode": "router_demo", "text": "生鲜物流延误的异常明细，按规定应该怎么赔"}, {"mode": "function_call_agent", "text": "用户 8b5f2503d0b789179e68b9254729e682 的风险分是多少"}, {"mode": "langchain_rag", "text": "3C 数码拆封后出现质量问题，应该怎么处理"}]}
 
 
 @app.get("/api/i18n/terms")
@@ -206,8 +207,8 @@ def i18n_terms(current_user: dict[str, Any] | None = Depends(optional_current_us
             {"zh": "政策依据", "en": "policy citation"},
         ],
         "examples": [
-            {"language": "zh", "text": "查询订单 53cdb2fc8bc7dce0b6741e2150273451 的物流状态"},
-            {"language": "en", "text": "Check refund eligibility for order 53cdb2fc8bc7dce0b6741e2150273451 and reply in English."},
+            {"language": "zh", "text": "查询订单 ade386486bfc747dfd8038f3b74a3c8c 的物流状态"},
+            {"language": "en", "text": "Check refund eligibility for order ade386486bfc747dfd8038f3b74a3c8c and reply in English."},
             {"language": "en", "text": "What is the BR market policy for damaged fresh food refunds?"},
         ],
     }
@@ -222,13 +223,36 @@ def tool_registry(role: Literal["viewer", "analyst", "supervisor"] = "viewer", c
 @app.post("/api/tools/invoke")
 def tool_invoke(request: ToolInvocationRequest, current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
     role = resolve_role(request.role, current_user)
-    return get_runtime().tool_registry.invoke(request.tool_name, arguments=request.arguments, role=role)
+    runtime = get_runtime()
+    result = runtime.tool_registry.invoke(request.tool_name, arguments=request.arguments, role=role)
+    runtime.audit_log.record_action({
+        "actor_user_id": current_user["id"] if current_user else "demo:anonymous",
+        "actor_role": role,
+        "action": "tool.invoke",
+        "target_type": "tool",
+        "target_id": request.tool_name,
+        "before_state": {"arguments": request.arguments},
+        "after_state": result,
+    })
+    return result
 
 
 @app.post("/api/mcp")
 def mcp_endpoint(request: MCPRequest, current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
     role = resolve_role(None, current_user)
-    return get_runtime().tool_registry.handle_mcp(request.model_dump(), role=role)
+    runtime = get_runtime()
+    result = runtime.tool_registry.handle_mcp(request.model_dump(), role=role)
+    target_id = str(request.params.get("name") or request.method)
+    runtime.audit_log.record_action({
+        "actor_user_id": current_user["id"] if current_user else "demo:anonymous",
+        "actor_role": role,
+        "action": f"mcp.{request.method}",
+        "target_type": "mcp_method",
+        "target_id": target_id,
+        "before_state": {"params": request.params},
+        "after_state": result,
+    })
+    return result
 
 
 def _run_eval_task(task_id: str) -> None:
@@ -246,13 +270,17 @@ def _run_eval_task(task_id: str) -> None:
             rows.append({"question": case["question"], "expected_doc_id": case["expected_doc_id"], "returned_doc_ids": ids, "citation_hit": hit})
         total = max(len(cases), 1)
         report = {
+            "status": "partially_evaluated",
             "total": len(cases),
-            "citation_hit_rate": round(citation_hits / total, 4),
-            "route_accuracy": 1.0,
-            "tool_selection_accuracy": 1.0,
-            "guardrail_interception": 1.0,
-            "retry_success_rate": 1.0,
-            "latency_p50_ms": 0,
+            "metrics": {"citation_hit_rate": round(citation_hits / total, 4)},
+            "metric_status": {
+                "citation_hit_rate": "evaluated",
+                "route_accuracy": "not_evaluated",
+                "tool_selection_accuracy": "not_evaluated",
+                "guardrail_interception": "not_evaluated",
+                "retry_success_rate": "not_evaluated",
+                "latency_p50_ms": "not_evaluated",
+            },
             "rows": rows,
         }
         runtime.task_queue.update(task_id, "done", result=report)
@@ -290,8 +318,14 @@ def eval_report(role: Literal["viewer", "analyst", "supervisor"] = "viewer", cur
         return {"error": {"code": "permission_denied", "message": f"当前角色 {role} 无权查看评测报告。"}}
     report_path = BASE_DIR / "eval" / "v2_eval_report.json"
     if not report_path.exists():
-        return {"error": {"code": "not_found", "message": "未找到 eval/v2_eval_report.json，请先运行 python scripts\\evaluate_rag.py --force-lexical。"}}
+        return {
+            "status": "not_evaluated",
+            "metrics": {},
+            "report_path": "eval/v2_eval_report.json",
+            "message": "尚未生成真实评测报告，请先运行 python scripts\\evaluate_rag.py --force-lexical。",
+        }
     payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["status"] = "evaluated"
     payload["report_path"] = "eval/v2_eval_report.json"
     payload["generated_at"] = datetime.fromtimestamp(report_path.stat().st_mtime, timezone.utc).isoformat()
     return payload
@@ -319,10 +353,21 @@ def review_queue(limit: int = 20, status: Literal["pending", "resolved", "reject
 def review_queue_status(case_id: str, request: ReviewDecisionRequest, current_user: dict[str, Any] | None = Depends(optional_current_user)) -> dict[str, Any]:
     role = resolve_role(request.role, current_user)
     if not PermissionPolicy.can_review_cases(role):
-        return {"error": {"code": "permission_denied", "message": f"当前角色 {request.role} 无权处理人工复核队列。"}}
-    item = get_runtime().review_queue.update_status(case_id, request.status, request.reviewer_note, request.assignee, request.case_priority)
+        return {"error": {"code": "permission_denied", "message": f"当前角色 {role} 无权处理人工复核队列。"}}
+    runtime = get_runtime()
+    before = runtime.review_queue.get(case_id)
+    item = runtime.review_queue.update_status(case_id, request.status, request.reviewer_note, request.assignee, request.case_priority)
     if not item:
         return {"error": {"code": "not_found", "message": f"未找到复核单 {case_id}。"}}
+    runtime.audit_log.record_action({
+        "actor_user_id": current_user["id"] if current_user else "demo:anonymous",
+        "actor_role": role,
+        "action": "review.status.update",
+        "target_type": "review_case",
+        "target_id": case_id,
+        "before_state": before or {},
+        "after_state": item,
+    })
     return {"item": item}
 
 
@@ -399,13 +444,8 @@ async def chat_stream(request: ChatRequest, raw_request: Request, current_user: 
     trace_id = raw_request.headers.get("x-trace-id")
     async def event_stream():
         try:
-            for phase in (
-                {"phase": "routing", "message": "正在识别意图并判断应走哪条工作流。"},
-                {"phase": "tools", "message": "正在准备检索上下文与工具调用参数。"},
-                {"phase": "synthesis", "message": "正在整理结果并生成面向业务的回答。"},
-            ):
-                yield f"event: status\ndata: {json.dumps(phase, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.18)
+            phase = {"phase": "agent_running", "message": "Terra 正在运行模型与只读工具链。"}
+            yield f"event: status\ndata: {json.dumps(phase, ensure_ascii=False)}\n\n"
             result = await asyncio.to_thread(get_runtime().orchestrator.respond, request.message.strip(), request.mode, request.session_id, role, request.response_language, trace_id)
             yield f"event: final\ndata: {json.dumps(result, ensure_ascii=False)}\n\n"
         except Exception as exc:
