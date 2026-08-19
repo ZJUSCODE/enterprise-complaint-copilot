@@ -29,7 +29,18 @@
 | WeKnora 可切换 | `RETRIEVAL_BACKEND=weknora` 一键切换腾讯开源 WeKnora 做外部检索底座，Agent/Guardrail/评测不动（见 `docs/weknora_integration.md`） |
 | 评测驱动 | 53 条 RAG 问答集 + 39 条 Agent 能力集，真实运行并出报告（见 `eval/README.md`、`eval/results/`） |
 
-评测结果（2026-08-18，BM25 真实链路）：政策命中 88.9%、负例拒答 100%、护栏拦截 100%、多轮复用 100%。详情见 `eval/results/2026-08-18_eval_report.md`。
+评测结果（2026-08-18，DeepSeek V4 Flash + 调优后混合检索）：
+
+| 指标 | 调优前 hybrid_bm25 | 调优后 hybrid_bm25 | BM25 单路 |
+| --- | --- | --- | --- |
+| citation 命中率 | 55.6% | **88.9%** | 88.9% |
+| RAG 综合成功率 | 62.3% | **90.6%** | 90.6% |
+| 负例拒答率 | 100% | 100% | 100% |
+| 护栏拦截率 | 100% | 100% | 100% |
+| 多轮记忆复用 | 100% | 100% | 100% |
+
+混合检索调优记录（候选池 / 政策锚点加权 / 融合权重，55.6% → 88.9%）见 [docs/hybrid_retrieval_tuning.md](docs/hybrid_retrieval_tuning.md)；
+完整报告见 `eval/results/tuning_report.md`、`eval/results/2026-08-18_eval_report.md`。
 
 ## 本地演示入口
 
@@ -95,18 +106,26 @@ node scripts\start_real_dev.js
 
 ## 架构总览
 
-```text
-Vue3 Workbench
-  -> FastAPI runtime
-    -> JWT / RBAC
-    -> Guardrail
-    -> AutoRouter
-      -> FunctionCallingAgent
-      -> SQL + RAG chain
-      -> LangChain RAG
-    -> ToolRegistry / MCP
-    -> Human review queue
-    -> Audit log
+```mermaid
+flowchart TD
+    U[Vue3 Workbench] -->|HTTP / SSE| API[FastAPI runtime]
+    API --> AUTH[JWT / RBAC]
+    API --> GR[Guardrail 护栏]
+    API --> R[AutoRouter 意图路由]
+    R -->|数据查询| FCA[FunctionCallingAgent]
+    R -->|SQL+RAG| SRAG[SQL + RAG chain]
+    R -->|知识问答| LRAG[LangChain RAG]
+    FCA --> TR[ToolRegistry / MCP]
+    FCA --> MEM[会话记忆]
+    LRAG --> BM[BM25 中文 bigram]
+    LRAG --> VD[向量检索 Chroma/bge-m3]
+    BM --> RRF[RRF 融合 + 政策锚点加权]
+    VD --> RRF
+    LRAG --> WK[WeKnora 可切换后端]
+    TR --> DB[(SQLite / MySQL 只读)]
+    API --> HQR[人工复核队列]
+    API --> AUD[审计日志]
+    RRF --> LLM[LLM 生成 DeepSeek]
 ```
 
 核心模块：

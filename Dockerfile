@@ -29,6 +29,7 @@ COPY app ./app
 COPY docs ./docs
 COPY knowledge_base ./knowledge_base
 COPY Olist ./Olist
+COPY demo_data ./demo_data
 COPY scripts ./scripts
 COPY --from=frontend-build /frontend/dist ./frontend/dist
 COPY main.py agent_chat.py build_knowledge_base.py train_model.py ./

@@ -65,6 +65,14 @@ class Settings:
     weknora_base_url: str = ""
     weknora_api_key: str = ""
     weknora_kb_id: str = ""
+    # 混合检索调参（hybrid_bm25）：调优后默认值（2026-08-18，88.9% vs 原 55.6%）
+    # 实验结论：BM25 候选 9 + POL 政策锚点加权 1.5 + BM25 融合权重 2.0 达到评测上限
+    hybrid_vector_candidates: int = 6
+    hybrid_bm25_candidates: int = 9
+    hybrid_bm25_weight: float = 2.0
+    hybrid_rrf_k: int = 60
+    hybrid_vector_threshold: float = 0.0
+    hybrid_policy_weight: float = 1.5
 
     def __post_init__(self) -> None:
         self.llm_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
@@ -94,3 +102,10 @@ class Settings:
         self.weknora_base_url = os.getenv("WEKNORA_BASE_URL", "").strip().rstrip("/")
         self.weknora_api_key = os.getenv("WEKNORA_API_KEY", "").strip()
         self.weknora_kb_id = os.getenv("WEKNORA_KB_ID", "").strip()
+        # 混合检索调参（环境变量可覆盖，默认值已固化为调优结果）
+        self.hybrid_vector_candidates = int(os.getenv("HYBRID_VECTOR_CANDIDATES", "6"))
+        self.hybrid_bm25_candidates = int(os.getenv("HYBRID_BM25_CANDIDATES", "9"))
+        self.hybrid_bm25_weight = float(os.getenv("HYBRID_BM25_WEIGHT", "2.0"))
+        self.hybrid_rrf_k = int(os.getenv("HYBRID_RRF_K", "60"))
+        self.hybrid_vector_threshold = float(os.getenv("HYBRID_VECTOR_THRESHOLD", "0.0"))
+        self.hybrid_policy_weight = float(os.getenv("HYBRID_POLICY_WEIGHT", "1.5"))

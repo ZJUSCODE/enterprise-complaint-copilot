@@ -411,14 +411,14 @@ class LangChainRAGService:
         retrieval_start = time.perf_counter()
         query_kwargs: dict[str, Any] = {
             "query_embeddings": [query_vector],
-            "n_results": max(top_k * 2, 6),
+            "n_results": max(self.settings.hybrid_vector_candidates, 1),
         }
         if category:
             query_kwargs["where"] = {"$or": [{"category": category}, {"category": "通用"}]}
         result = self.collection.query(**query_kwargs)
         retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
 
-        # 候选池：向量 top_k*2 + BM25 top_k*2
+        # 候选池：向量 + BM25（数量可用环境变量调优）
         vector_ranked: list[str] = []
         vector_scores: dict[str, float] = {}
         distances = result.get("distances", [[]])[0] if result.get("distances") else []
@@ -429,18 +429,34 @@ class LangChainRAGService:
             distance = float(distances[index]) if index < len(distances) else 1.0
             vector_ranked.append(doc_id)
             vector_scores[doc_id] = max(0.0, 1.0 - distance)
+        # 向量门控：相似度低于阈值不进融合池（默认 0 不启用）
+        if self.settings.hybrid_vector_threshold > 0:
+            vector_ranked = [did for did in vector_ranked if vector_scores.get(did, 0.0) >= self.settings.hybrid_vector_threshold]
 
         bm25_ok = self.bm25_index.size > 0
         bm25_ranked: list[str] = []
         bm25_scores: dict[str, float] = {}
         if bm25_ok:
-            hits = self.bm25_index.search(question, category=category, top_k=max(top_k * 2, 6))
+            hits = self.bm25_index.search(question, category=category, top_k=max(self.settings.hybrid_bm25_candidates, 1))
+            # 政策锚点加权（POL- 条目 ×hybrid_policy_weight，默认 1.0），与 _bm25_sources 单路口径一致
+            weighted_bm25: list[tuple[str, float, float]] = []
             for idx, score in hits:
                 doc_id = self.bm25_index._ids[idx]
+                w = self.settings.hybrid_policy_weight if str(doc_id).startswith("POL-") else 1.0
+                weighted_bm25.append((doc_id, score * w, score))
+            weighted_bm25.sort(key=lambda item: item[1], reverse=True)
+            for doc_id, _wscore, raw_score in weighted_bm25:
                 bm25_ranked.append(doc_id)
-                bm25_scores[doc_id] = score
+                bm25_scores[doc_id] = raw_score
 
-        fused = reciprocal_rank_fusion([vector_ranked, bm25_ranked]) if bm25_ok else [(did, 1.0) for did in vector_ranked]
+        if bm25_ok:
+            fused = reciprocal_rank_fusion(
+                [vector_ranked, bm25_ranked],
+                k=self.settings.hybrid_rrf_k,
+                weights=[1.0, self.settings.hybrid_bm25_weight],
+            )
+        else:
+            fused = [(did, 1.0) for did in vector_ranked]
         top_ids = [doc_id for doc_id, _ in fused[:top_k]]
 
         matched: list[dict[str, Any]] = []

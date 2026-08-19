@@ -237,6 +237,12 @@ class FunctionCallingAgent:
         elif order_id and contains_any(message_lower, ["eligible", "refund eligibility", "能退", "退款资格", "能不能退", "是否能退"]):
             tool_name = "query_refund_eligibility"
             validated_args = {"order_id": order_id, "reason": user_message}
+        elif contains_any(message_lower, ["eligible", "refund eligibility", "能退", "退款资格", "能不能退", "是否能退"]):
+            # Refund-eligibility intent without a known order id still routes to the
+            # eligibility tool (it will report the missing/unknown order); this keeps
+            # ambiguous multi-intent questions like "这个订单能不能退？" on the right tool.
+            tool_name = "query_refund_eligibility"
+            validated_args = {"order_id": order_id or "", "reason": user_message}
         elif contains_any(message_lower, ["market policy", "policy by market", "市场政策", "跨市场"]):
             market_match = re.search(r"\b(BR|US|EU|CN)\b", user_message, re.IGNORECASE)
             tool_name = "query_policy_by_market"

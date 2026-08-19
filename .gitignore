@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Local assistant memory / temp scripts
+.workbuddy/
+_verify_fix.py
+
 # Python cache and test cache
 __pycache__/
 *.py[cod]

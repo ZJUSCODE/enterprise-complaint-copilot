@@ -18,7 +18,7 @@ class AutoRouter:
     def _rule_route(self, message: str) -> dict[str, Any] | None:
         if re.search(r"[0-9a-f]{24,}", message, re.IGNORECASE) and "风险" in message:
             return {"mode": "function_call_agent", "reason": "命中用户 ID 与风险查询规则。", "confidence": 0.96, "source": "rule"}
-        has_structured_query = contains_any(message, ["查询", "查一下", "明细", "统计", "分析", "订单", "风险", "用户", "超过", "多少", "金额", "top", "最多"])
+        has_structured_query = contains_any(message, ["查询", "查一下", "明细", "统计", "分析", "订单", "风险", "用户", "超过", "多少", "金额", "top", "最多", "show", "statistics", "stats", "complaint", "latest", "trend", "count"])
         has_money_query = contains_any(message, ["退款", "赔付"]) and contains_any(message, ["查询", "查一下", "明细", "统计", "分析", "订单", "用户", "风险", "超过", "多少", "金额"])
         has_query = has_structured_query or has_money_query
         has_policy = contains_any(message, POLICY_PATTERNS)

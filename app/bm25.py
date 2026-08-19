@@ -44,16 +44,21 @@ def tokenize_for_bm25(text: str) -> list[str]:
 
 
 def reciprocal_rank_fusion(
-    ranked_id_lists: Sequence[Sequence[str]], k: int = 60
+    ranked_id_lists: Sequence[Sequence[str]],
+    k: int = 60,
+    weights: Sequence[float] | None = None,
 ) -> list[tuple[str, float]]:
     """RRF 融合多个排序列表。
 
-    score(id) = sum( 1 / (k + rank(id)) )，rank 从 1 开始。
+    score(id) = sum( w_i / (k + rank_i(id)) )，rank 从 1 开始。
+    weights 与 ranked_id_lists 一一对应（默认全 1.0，保持原 RRF 行为）。
     """
+    if weights is None:
+        weights = [1.0] * len(ranked_id_lists)
     scores: dict[str, float] = {}
-    for ranked in ranked_id_lists:
+    for ranked, weight in zip(ranked_id_lists, weights):
         for rank, doc_id in enumerate(ranked, start=1):
-            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+            scores[doc_id] = scores.get(doc_id, 0.0) + weight / (k + rank)
     return sorted(scores.items(), key=lambda item: item[1], reverse=True)
 
 
